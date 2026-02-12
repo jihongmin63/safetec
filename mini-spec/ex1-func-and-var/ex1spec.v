@@ -206,7 +206,7 @@ forall env exp val, (env |- exp ==> val) <-> evaluation C exp = Some val.
 Admitted. 
 *)
 
-Theorem Determinism :
+Theorem Determinism_Type_Check :
 forall C exp typ1 typ2, (C |- exp : typ1) -> (C |- exp : typ2) -> typ1 = typ2.
 Proof.
     intros C exp typ1 typ2 E1.
@@ -216,4 +216,17 @@ Proof.
     - rewrite H in H2. injection H2 as H2. apply H2.
     - f_equal. apply IHE1 in H4. apply H4.
     - apply IHE1_1 in H2. injection H2 as _ H2. apply H2.
+Qed.
+
+Theorem Determinism_Evaluation :
+forall env exp val1 val2, (env |- exp ==> val1) -> (env |- exp ==> val2) -> val1 = val2.
+Proof.
+    intros env exp val1 val2 E1.
+    generalize dependent val2.
+    induction E1; intros val2 E2; inversion E2; try reflexivity.
+    - apply IHE1_1 in H2. apply IHE1_2 in H4. injection H2 as H2. injection H4 as H4. rewrite H2, H4. reflexivity.
+    - apply IHE1_1 in H2. apply IHE1_2 in H4. injection H2 as H2. injection H4 as H4. rewrite H2, H4. reflexivity.
+    - apply IHE1_1 in H4. rewrite <- H4 in H5. apply IHE1_2 in H5. apply H5.
+    - rewrite H in H2. injection H2 as H2. apply H2.
+    - apply IHE1_2 in H3. rewrite <- H3 in H5. apply IHE1_1 in H1. injection H1 as H11 H12 H13. rewrite <- H11, <- H12, <- H13 in H5. apply IHE1_3 in H5. apply H5.
 Qed.
