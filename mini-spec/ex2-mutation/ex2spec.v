@@ -89,7 +89,12 @@ Proof.
 Qed.
 
 Theorem Type_Eq_is_valid2 : forall ty, type_eq ty ty = true.
-Admitted.
+Proof.
+    intro ty.
+    induction ty; try reflexivity.
+    - simpl. rewrite IHty1, IHty2. reflexivity.
+    - simpl. rewrite IHty. reflexivity.
+Qed.
 
 Fixpoint type_check (C : context) (exp : expr) : option type :=
     match exp with
