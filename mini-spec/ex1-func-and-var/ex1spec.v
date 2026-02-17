@@ -175,36 +175,66 @@ Proof.
     }
 Qed.
 
-(*
-Fixpoint evaluation (env : environment) (exp : expr) : option value :=
-    match exp with
-    | NumE n => Some (NumV n)
-    | BinE op exp1 exp2 =>
-        match (evaluation env exp1), (evaluation env exp2) with
-        | Some (NumV n1), Some (NumV n2) => 
-            match op with
-            | ADD => Some (NumV (n1 + n2))
-            | MUL => Some (NumV (n1 * n2))
+Fixpoint evalution_w_fuel (env : environment) (exp : expr) (fuel : nat) : option value :=
+    match fuel with
+    | 0 => None
+    | S fuel' =>
+        match exp with
+        | NumE n => Some (NumV n)
+        | BinE op exp1 exp2 =>
+            match (evalution_w_fuel env exp1 fuel'), (evalution_w_fuel env exp2 fuel') with
+            | Some (NumV n1), Some (NumV n2) => 
+                match op with
+                | ADD => Some (NumV (n1 + n2))
+                | MUL => Some (NumV (n1 * n2))
+                end
+            | _, _ => None
             end
-        | _, _ => None
-        end
-    | LetE x exp1 exp2 =>
-        match (evaluation env exp1) with
-        | Some val => evaluation ((x, val) :: env) exp2
-        | None => None
-        end
-    | VarE x => find_id x env
-    | FuncE x ty exp => Some (CloV x exp env)
-    | ApplyE exp1 exp2 =>
-        match (evaluation env exp1), (evaluation env exp2) with
-        | Some (CloV x exp env_clo), Some val => (evaluation ((x, val) :: env) exp)
-        | _, _ => None
+        | LetE x exp1 exp2 =>
+            match (evalution_w_fuel env exp1 fuel') with
+            | Some val => evalution_w_fuel ((x, val) :: env) exp2 fuel'
+            | None => None
+            end
+        | VarE x => find_id x env
+        | FuncE x ty exp => Some (CloV x exp env)
+        | ApplyE exp1 exp2 =>
+            match (evalution_w_fuel env exp1 fuel'), (evalution_w_fuel env exp2 fuel') with
+            | Some (CloV x exp env_clo), Some val => (evalution_w_fuel ((x, val) :: env_clo) exp fuel')
+            | _, _ => None
+            end
         end
     end.
-Theorem Termination_Evaluation :
-forall env exp val, (env |- exp ==> val) <-> evaluation C exp = Some val.
-Admitted. 
-*)
+
+
+Theorem Termination_evalution_w_fuel :
+forall env exp val n, evalution_w_fuel env exp n = Some val -> (env |- exp ==> val).
+Proof.
+    intros env exp. generalize dependent env.
+    induction exp; intros env val fuel E; (destruct fuel; simpl in E; try discriminate E; try (injection E as E)).
+    + rewrite <- E. apply E_numE; assumption.
+    + destruct (evalution_w_fuel env exp1 fuel) eqn:E1; simpl in E; try discriminate E.
+      destruct v; simpl in E; try discriminate E.
+      destruct (evalution_w_fuel env exp2 fuel) eqn:E2; simpl in E; try discriminate E.
+      destruct v; simpl in E; try discriminate E.
+      apply IHexp1 in E1. apply IHexp2 in E2.
+      destruct op.
+      ++ injection E as E. rewrite <- E. apply (E_binE_add env exp1 exp2 n n0); assumption.
+      ++ injection E as E. rewrite <- E. apply (E_binE_mul env exp1 exp2 n n0); assumption.
+    + destruct (evalution_w_fuel env exp1 fuel) eqn:E1; simpl in E; try discriminate E.
+      destruct (evalution_w_fuel ((x, v) :: env) exp2 fuel) eqn:E2; simpl in E; try discriminate E.
+      apply IHexp1 in E1. apply IHexp2 in E2. injection E as E. rewrite <- E.
+      apply E_letE with (valp := v); assumption.
+    + apply E_varE; assumption.
+    + rewrite <- E. apply E_funcE; assumption.
+    + destruct (evalution_w_fuel env exp1 fuel) eqn:E1; simpl in E; try discriminate E.
+      destruct v; simpl in E; try discriminate E.
+      destruct (evalution_w_fuel env exp2 fuel) eqn:E2; simpl in E; try discriminate E.
+      apply IHexp1 in E1. apply IHexp2 in E2.
+      apply E_applyE with (x := x) (eb := exp) (env_clo := env0) (vala := v). apply E1. apply E2. admit.
+      (* 함수를 적용하게 되면 induction 구조로 감추어져 있던 exp과 env이 등장하고 적용해야 함. 
+         보통의 경우에는 induction 구조를 하나하나 정의해야겠지만, 복잡하고 어려움. *)
+Admitted.
+
 
 Theorem Determinism_Type_Check :
 forall C exp typ1 typ2, (C |- exp : typ1) -> (C |- exp : typ2) -> typ1 = typ2.
@@ -218,7 +248,7 @@ Proof.
     - apply IHE1_1 in H2. injection H2 as _ H2. apply H2.
 Qed.
 
-Theorem Determinism_Evaluation :
+Theorem Determinism_evalution :
 forall env exp val1 val2, (env |- exp ==> val1) -> (env |- exp ==> val2) -> val1 = val2.
 Proof.
     intros env exp val1 val2 E1.
