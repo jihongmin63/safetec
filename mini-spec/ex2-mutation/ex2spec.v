@@ -211,3 +211,157 @@ Proof.
     - apply IHE1 in H1. injection H1 as H1. apply H1.
     - apply IHE1_1 in H2. injection H2 as H2. apply H2.
 Qed.
+
+Inductive value :=
+    | NumV (n : nat)
+    | CloV (x : id) (exp : expr) (env : list (id * value))
+    | LocV (loc : nat).
+
+Definition environment := list (id * value).
+Definition sto := list value.
+
+Fixpoint find_nth (n : nat) (l : list value) : option value :=
+    match n, l with
+    | 1, head :: tail => Some head
+    | S m, head :: tail => find_nth m tail
+    | _, _ => None
+    end.
+
+Fixpoint change_nth (n : nat) (val : value) (l : list value) : list value :=
+    match l with
+    | head :: tail =>
+        match n with
+        | 0 | 1 => [ val ]
+        | S m => head :: (change_nth m val tail)
+        end
+    | [] => []
+    end.
+
+Reserved Notation "C ; St |- e ==> v ; St'"  (at level 80, St at next level, e at next level, v at next level).
+Inductive Eval : environment -> sto -> expr -> value -> sto -> Prop :=
+  | E_numE : forall env sto n,  env ; sto |- (NumE n) ==> (NumV n) ; sto
+  | E_binE_add : forall env sto sto1 sto2 el er il ir,
+    (env ; sto |- el ==> (NumV il) ; sto1) -> (env ; sto1 |- er ==> (NumV ir) ; sto2) -> (env ; sto |- (BinE ADD el er) ==> (NumV (il + ir)) ; sto2)
+  | E_binE_mul : forall env sto sto1 sto2 el er il ir,
+    (env ; sto |- el ==> (NumV il) ; sto1) -> (env ; sto1 |- er ==> (NumV ir) ; sto2) -> (env ; sto |- (BinE MUL el er) ==> (NumV (il * ir)) ; sto2)
+  | E_letE : forall env sto sto1 sto2 x ep eb valp valb,
+    (env ; sto |- ep ==> valp ; sto1) -> (((x, valp) :: env) ; sto1 |- eb ==> valb ; sto2) -> (env ; sto |- (LetE x ep eb) ==> valb ; sto2)
+  | E_varE : forall env sto x value,
+    (find_id x env = Some value) -> env ; sto |- (VarE x) ==> value ; sto
+  | E_funcE : forall env sto x ty exp, env ; sto |- (FuncE x ty exp) ==> (CloV x exp env) ; sto
+  | E_applyE : forall env env_clo sto sto1 sto2 sto3 x ef ea eb valr vala,
+    (env ; sto |- ef ==> (CloV x eb env_clo) ; sto1) -> (env ; sto1 |- ea ==> vala ; sto2) -> (((x, vala) :: env_clo) ; sto2 |- eb ==> valr ; sto3) -> env ; sto |- (ApplyE ef ea) ==> valr ; sto3
+  | E_refE : forall env sto sto1 exp n value,
+    (env ; sto |- exp ==> value ; sto1) -> (length sto = n) -> env ; sto |- (RefE exp) ==> (LocV n) ; (sto1 ++ [ value ])
+  | E_derefE : forall env sto sto1 exp n value,
+    (env ; sto |- exp ==> LocV n ; sto1) -> (find_nth n sto1 = Some value) -> env ; sto |- (DerefE exp) ==> value ; sto1
+  | E_updateE : forall env sto sto1 sto2 sto3 el er n valr,
+    (env ; sto |- el ==> (LocV n); sto1) -> (env ; sto1 |- er ==> valr ; sto2) -> (change_nth n valr sto2 = sto3) -> env ; sto |- (UpdateE el er) ==> valr ; sto3
+where "C ; St |- e ==> v ; St'" := (Eval C St e v St').
+
+(*Fixpoint evalution_w_fuel (env : environment) (st : sto) (exp : expr) (fuel : nat) : option (value * sto) :=
+    match fuel with
+    | 0 => None
+    | S fuel' =>
+        match exp with
+        | NumE n => Some (NumV n, st)
+        | BinE op exp1 exp2 =>
+            match (evaluation_w_fuel env st exp1 fuel') with
+            | Some (NumV n1, st1) =>
+                match (evalutiation_w_fuel env st1 exp2 fuel') with
+                | Some (NumV n2, st2) =>
+                    match op with
+                    | ADD => Some (NumV (n1 + n2), st2)
+                    | MUL => Some (NumV (n1 * n2), st2)
+                    end
+                | None => None
+                end
+            | None => None
+            end
+        | LetE x exp1 exp2 =>
+            match (evaluation_w_fuel env st exp1 fuel') with
+            | Some (valp, st1) =>
+                match (evaluation_w_fuel ((x, valp) :: env) st1 exp2 fuel') with
+                | Some (valb, st2) =>
+                    Some (valb, st2)
+                | None => None
+                end
+            | None => None
+            end
+        | VarE x =>
+            match find_id x env with
+            | Some val => Some (val, st)
+            | None => None
+            end
+        | FuncE x ty exp => Some ((CloV x exp env), st)
+        | ApplyE exp1 exp2 =>
+            match (evaluation_w_fuel env st exp1 fuel') with
+            | Some ((CloV x eb env_clo), st1) =>
+                match (evaluation_w_fuel env st1 exp2 fuel') with
+                | Some (vala, st2) =>
+                    match (evaluation_w_fuel ((x, vala) :: env_clo) st2 eb fuel') with
+                    | Some (valr, st3) => Some (valr, st3)
+                    | None => None
+                    end
+                | None => None
+                end
+            | None => None
+            end
+        | RefE exp =>
+            match (evaluation_w_fuel env st exp fuel') with
+            | Some (LocV n, st1) =>
+                if length st1 =? n then Some ((LocV n), (st1 ++ [ value ]))
+                else None
+            | None => None
+            end
+        | DerefE exp =>
+            match (evaluation env sto exp fuel') with
+            | Some (LocV n, st1) =>
+                if 
+            | None => None
+            end
+        | UpdateE exp1 exp2 =>
+            match (evaluation_w_fuel env st exp1 fuel') with
+            | Some (LocV n, st1) =>
+                match (evaluation_w_fuel env st1 exp2 fuel') with
+                    admit.
+                end
+            | None => None
+            end
+        end
+    end.*)
+
+(* expression과 value의 boolean equality와 iff 조건 정의해야 함*)
+(*변수 정의가 조건일 때, 각 변수의 데이터 구조마다 equality를 정의해야 함*)
+
+Theorem Determinism_Evaluation :
+forall C sto1 sto2 sto2' exp value value',
+(C ; sto1 |- exp ==> value ; sto2) -> (C ; sto1 |- exp ==> value' ; sto2') -> (value = value' /\ sto2 = sto2').
+Proof.
+    intros C sto1 sto2 sto2' exp value value' E1.
+    generalize dependent sto2'.
+    generalize dependent value'.
+    induction E1; intros value' sto2' E2; inversion E2.
+    - split. reflexivity. reflexivity.
+    - apply IHE1_1 in H3. destruct H3 as [H3_val H3_sto].
+      rewrite <- H3_sto in H6. apply IHE1_2 in H6. destruct H6 as [H6_val H6_sto].
+      split. injection H3_val as Val1. injection H6_val as Val2. rewrite Val1, Val2. reflexivity. apply H6_sto.
+    - apply IHE1_1 in H3. destruct H3 as [H3_val H3_sto].
+      rewrite <- H3_sto in H6. apply IHE1_2 in H6. destruct H6 as [H6_val H6_sto].
+      split. injection H3_val as Val1. injection H6_val as Val2. rewrite Val1, Val2. reflexivity. apply H6_sto.
+    - apply IHE1_1 in H6. destruct H6 as [H6_val H6_sto]. rewrite H6_val, H6_sto in IHE1_2.
+      apply IHE1_2 in H7. apply H7.
+    - rewrite H in H3. injection H3 as H3. split. apply H3. reflexivity.
+    - split. reflexivity. reflexivity.
+    - apply IHE1_1 in H1. destruct H1 as [H1_vars H1_sto].
+      rewrite H1_sto in IHE1_2. apply IHE1_2 in H4. destruct H4 as [H4_val H4_sto].
+      injection H1_vars as H1_x H1_eb H1_env. rewrite H1_x, H4_val, H4_sto, H1_eb, H1_env in IHE1_3.
+      apply IHE1_3 in H7. apply H7.
+    - apply IHE1 in H1. destruct H1 as [H1_val H1]. rewrite H in H4. split. f_equal. apply H4. rewrite H1, H1_val. reflexivity.
+    - apply IHE1 in H1. destruct H1 as [H1_n H1_sto]. injection H1_n as H1_n.
+      rewrite <- H1_n, <- H1_sto in H4. rewrite H in H4. injection H4 as H4.
+      split. apply H4. apply H1_sto.
+    - apply IHE1_1 in H2. destruct H2 as [H2_n H2_sto]. rewrite H2_sto in IHE1_2. injection H2_n as H2_n.
+      apply IHE1_2 in H5. destruct H5 as [H5_n H5_sto]. rewrite H5_sto, H5_n, H2_n in H. rewrite H in H8.
+      split. apply H5_n. apply H8.
+Qed.
