@@ -1,4 +1,5 @@
 From Stdlib Require Import String.
+From Stdlib Require Import Nat.
 From Stdlib Require Import List.
 Import ListNotations.
 
@@ -56,6 +57,26 @@ Fixpoint type_eq (ty1 ty2 : type) : bool := match ty1, ty2 with
 | INT, INT => true
 | Func ty11 ty12, Func ty21 ty22 => andb (type_eq ty11 ty21) (type_eq ty12 ty22)
 | REF ty1, REF ty2 => type_eq ty1 ty2
+| _, _ => false
+end.
+
+Fixpoint expr_eq (exp1 exp2 : expr) : bool := match exp1, exp2 with
+| NumE n1, NumE n2 => true
+| BinE opa expa_1 expa_2, BinE opb expb_1 expb_2 =>
+    match opa, opb with
+    | ADD, ADD | MUL, MUL =>
+        (expr_eq expa_1 expb_1) && (expr_eq expa_2 expb_2)
+    | _, _ => false
+    end
+| LetE xa expa_1 expa_2, LetE xb expb_1 expb_2 =>
+    (xa =? xb)%string && (expr_eq expa_1 expb_1) && (expr_eq expa_2 expb_2)
+| VarE xa, VarE xb => (xa =? xb)%string
+| FuncE xa tya expa, FuncE xb tyb expb =>
+    (xa =? xb)%string && (type_eq tya tyb) && (expr_eq expa expb)
+| ApplyE expa_1 expa_2, ApplyE expb_1 expb_2 => (expr_eq expa_1 expb_1) && (expr_eq expa_2 expb_2)
+| RefE expa, RefE expb => expr_eq expa expb
+| DerefE expa, DerefE expb => expr_eq expa expb
+| UpdateE expa_1 expa_2, UpdateE expb_1 expb_2 => (expr_eq expa_1 expb_1) && (expr_eq expa_2 expb_2)
 | _, _ => false
 end.
 
@@ -216,6 +237,19 @@ Inductive value :=
     | NumV (n : nat)
     | CloV (x : id) (exp : expr) (env : list (id * value))
     | LocV (loc : nat).
+
+(*Fixpoint val_eq (val1 val2 : value) : bool := 
+    match val1, val2 with
+    | NumV n1, NumV n2 => n1 =? n2
+    | LocV loc1, LocV loc2 => loc1 =? loc2
+    | CloV x1 exp1 env1, CloV x2 exp2 env2 =>
+        let env_comp := forallb (fun x => match x with
+            | ((xa, vala), (xb, valb)) => (((xa =? xb)%string) && (val_eq vala valb))
+            end
+        ) (combine env1 env2) in
+        (x1 =? x2)%string && (expr_eq exp1 exp2) && env_comp
+    | _, _ => false
+    end.*)
 
 Definition environment := list (id * value).
 Definition sto := list value.
