@@ -3,4 +3,5 @@
 *.vo
 *.vok
 *.vos
-debug.txt
+debug*.txt
+mini-spec/llm/*
