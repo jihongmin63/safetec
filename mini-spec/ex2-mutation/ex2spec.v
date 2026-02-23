@@ -1,7 +1,11 @@
 From Stdlib Require Import String.
 From Stdlib Require Import Nat.
 From Stdlib Require Import List.
+From Stdlib Require Import Bool.
 Import ListNotations.
+
+Local Open Scope nat_scope.
+Local Open Scope bool_scope.
 
 Definition id := string.
 
@@ -60,8 +64,35 @@ Fixpoint type_eq (ty1 ty2 : type) : bool := match ty1, ty2 with
 | _, _ => false
 end.
 
+Theorem type_eq_is_sound :
+forall ty1 ty2, type_eq ty1 ty2 = true <-> ty1 = ty2.
+Proof.
+    intros ty1 ty2.
+    split.
+    {
+        generalize dependent ty2.
+        induction ty1; intros ty2 E; destruct ty2; simpl in E; try (discriminate E).
+        - reflexivity.
+        - apply andb_true_iff in E. destruct E as [Ea Eb].
+          apply IHty1_1 in Ea. apply IHty1_2 in Eb.
+          f_equal. apply Ea. apply Eb.
+        - apply IHty1 in E. f_equal. apply E.
+    }
+    {
+        generalize dependent ty2.
+        induction ty1; intros ty2 E; rewrite <- E; simpl.
+        - reflexivity.
+        - assert (H1 : ty1_1 = ty1_1). { reflexivity. }
+          apply IHty1_1 in H1. rewrite H1.
+          assert (H2 : ty1_2 = ty1_2). { reflexivity. }
+          apply IHty1_2 in H2. rewrite H2.
+          reflexivity.
+        - apply IHty1. reflexivity.
+    }
+Qed.
+
 Fixpoint expr_eq (exp1 exp2 : expr) : bool := match exp1, exp2 with
-| NumE n1, NumE n2 => true
+| NumE n1, NumE n2 => n1 =? n2
 | BinE opa expa_1 expa_2, BinE opb expb_1 expb_2 =>
     match opa, opb with
     | ADD, ADD | MUL, MUL =>
@@ -79,6 +110,80 @@ Fixpoint expr_eq (exp1 exp2 : expr) : bool := match exp1, exp2 with
 | UpdateE expa_1 expa_2, UpdateE expb_1 expb_2 => (expr_eq expa_1 expb_1) && (expr_eq expa_2 expb_2)
 | _, _ => false
 end.
+Theorem expr_eq_is_sound :
+forall exp1 exp2, expr_eq exp1 exp2 = true <-> exp1 = exp2.
+Proof.
+    intros exp1 exp2.
+    split.
+    {
+        generalize dependent exp2.
+        induction exp1; intros exp2 E; destruct exp2; try (simpl in E); try (discriminate E).
+        - rewrite PeanoNat.Nat.eqb_eq in E. f_equal. apply E.
+        - destruct op.
+          + destruct op0; try (discriminate E).
+            rewrite andb_true_iff in E. destruct E as [Ea Eb].
+            apply IHexp1_1 in Ea. apply IHexp1_2 in Eb.
+            f_equal. apply Ea. apply Eb.
+          + destruct op0; try (discriminate E).
+            rewrite andb_true_iff in E. destruct E as [Ea Eb].
+            apply IHexp1_1 in Ea. apply IHexp1_2 in Eb.
+            f_equal. apply Ea. apply Eb.
+        - apply andb_true_iff in E. destruct E as [Eab Ec].
+          apply andb_true_iff in Eab. destruct Eab as [Ea Eb].
+          rewrite String.eqb_eq in Ea. apply IHexp1_1 in Eb. apply IHexp1_2 in Ec.
+          f_equal. apply Ea. apply Eb. apply Ec.
+        - f_equal. rewrite String.eqb_eq in E. apply E.
+        - apply andb_true_iff in E. destruct E as [Eab Ec].
+          apply andb_true_iff in Eab. destruct Eab as [Ea Eb].
+          f_equal. apply String.eqb_eq in Ea. apply Ea.
+          rewrite type_eq_is_sound in Eb. apply Eb.
+          apply IHexp1 in Ec. apply Ec.
+        - apply andb_true_iff in E. destruct E as [Ea Eb].
+          apply IHexp1_1 in Ea. apply IHexp1_2 in Eb.
+          f_equal. apply Ea. apply Eb.
+        - apply IHexp1 in E. f_equal. apply E.
+        - apply IHexp1 in E. f_equal. apply E.
+        - apply andb_true_iff in E. destruct E as [Ea Eb].
+          apply IHexp1_1 in Ea. apply IHexp1_2 in Eb.
+          f_equal. apply Ea. apply Eb.
+    }
+    {
+        generalize dependent exp2.
+        induction exp1; intros exp2 E; rewrite <- E; simpl.
+        - apply PeanoNat.Nat.eqb_refl.
+        - destruct op.
+          + assert (H : forall x : expr, x = x). { intro x. reflexivity. }
+            apply andb_true_iff. split.
+            apply (IHexp1_1 exp1_1 (H exp1_1)).
+            apply (IHexp1_2 exp1_2 (H exp1_2)).
+          + assert (H : forall x : expr, x = x). { intro x. reflexivity. }
+            apply andb_true_iff. split.
+            apply (IHexp1_1 exp1_1 (H exp1_1)).
+            apply (IHexp1_2 exp1_2 (H exp1_2)).
+        - assert (H : forall exp : expr, exp = exp). { intro exp. reflexivity. }
+          rewrite andb_true_iff. split.
+          rewrite andb_true_iff. split.
+          apply String.eqb_refl.
+          apply IHexp1_1. apply H.
+          apply IHexp1_2. apply H.
+        - apply String.eqb_refl.
+        - assert (H : forall exp : expr, exp = exp). { intro exp. reflexivity. }
+          rewrite andb_true_iff. split.
+          rewrite andb_true_iff. split.
+          apply String.eqb_refl.
+          apply type_eq_is_sound. reflexivity.
+          apply IHexp1. apply H.
+        - assert (H : forall exp : expr, exp = exp). { intro exp. reflexivity. } rewrite andb_true_iff. split.
+          apply IHexp1_1. apply H.
+          apply IHexp1_2. apply H.
+        - assert (H : forall exp : expr, exp = exp). { intro exp. reflexivity. } apply IHexp1. apply H.
+        - assert (H : forall exp : expr, exp = exp). { intro exp. reflexivity. } apply IHexp1. apply H.
+        - assert (H : forall exp : expr, exp = exp). { intro exp. reflexivity. }
+          rewrite andb_true_iff. split.
+          apply IHexp1_1. apply H.
+          apply IHexp1_2. apply H.
+    }
+Qed.
 
 Theorem Type_Eq_is_valid1 : forall ty1 ty2, type_eq ty1 ty2 = true <-> ty1 = ty2.
 Proof.
@@ -238,18 +343,71 @@ Inductive value :=
     | CloV (x : id) (exp : expr) (env : list (id * value))
     | LocV (loc : nat).
 
-(*Fixpoint val_eq (val1 val2 : value) : bool := 
-    match val1, val2 with
-    | NumV n1, NumV n2 => n1 =? n2
-    | LocV loc1, LocV loc2 => loc1 =? loc2
-    | CloV x1 exp1 env1, CloV x2 exp2 env2 =>
-        let env_comp := forallb (fun x => match x with
-            | ((xa, vala), (xb, valb)) => (((xa =? xb)%string) && (val_eq vala valb))
-            end
-        ) (combine env1 env2) in
-        (x1 =? x2)%string && (expr_eq exp1 exp2) && env_comp
-    | _, _ => false
-    end.*)
+Fixpoint val_eq (val1 val2 : value) (fuel : nat) : bool := 
+    match fuel with
+    | 0 => false
+    | S fuel' =>
+        match val1, val2 with
+        | NumV n1, NumV n2 => n1 =? n2
+        | LocV loc1, LocV loc2 => loc1 =? loc2
+        | CloV x1 exp1 env1, CloV x2 exp2 env2 =>
+            let env_comp := (length env1 =? length env2) && forallb (fun x => match x with
+                | ((xa, vala), (xb, valb)) => ((xa =? xb)%string && (val_eq vala valb fuel'))
+                end
+            ) (combine env1 env2) in
+            (x1 =? x2)%string && (expr_eq exp1 exp2) && env_comp
+        | _, _ => false
+        end
+    end.
+Theorem val_eq_sound : forall fuel val1 val2,
+  val_eq val1 val2 fuel = true -> val1 = val2.
+Proof.
+    intro fuel.
+    induction fuel; intros val1 val2 E.
+    - simpl in E. discriminate E.
+    - induction val1; destruct val2; simpl in E; try (discriminate E).
+      + f_equal. apply PeanoNat.Nat.eqb_eq in E. apply E.
+      + apply andb_true_iff in E. destruct E as [Ea Ebc].
+        apply andb_true_iff in Ea. destruct Ea as [Estr Eexpr].
+        apply andb_true_iff in Ebc. destruct Ebc as [Elen Etail].
+        f_equal. apply String.eqb_eq in Estr. apply Estr.
+        apply expr_eq_is_sound. apply Eexpr.
+        assert (H : (Datatypes.length env =? Datatypes.length env0) && (forallb
+        (fun x : string * value * (string * value) =>
+        let (y, y0) := x in
+        let (xa, vala) := y in
+        let (xb, valb) := y0 in (xa =? xb)%string && val_eq vala valb fuel)
+        (combine env env0)) = true). { rewrite Elen. rewrite Etail. reflexivity. }
+        assert (IH : forall env env0, (Datatypes.length env =? Datatypes.length env0) && (forallb
+        (fun x : string * value * (string * value) =>
+        let (y, y0) := x in
+        let (xa, vala) := y in
+        let (xb, valb) := y0 in (xa =? xb)%string && val_eq vala valb fuel)
+        (combine env env0)) = true -> env = env0). { 
+            intros env1.
+            induction env1; intros env2 E; apply andb_true_iff in E; destruct E as [Hlen Htail].
+            - apply PeanoNat.Nat.eqb_eq in Hlen. destruct env2; try (discriminate Hlen). reflexivity.
+            - destruct env2; try (discriminate Hlen). simpl in Hlen.
+              simpl in Htail. apply (andb_true_iff (let (xa, vala) := a in let (xb, valb) := p in (xa =? xb)%string && val_eq vala valb fuel)) in Htail.
+              destruct Htail as [Hhead Htail].
+              assert (H' : (Datatypes.length env1 =? Datatypes.length env2) &&
+                forallb
+                (fun x : string * value * (string * value) =>
+                let (y, y0) := x in
+                let (xa, vala) := y in
+                let (xb, valb) := y0 in (xa =? xb)%string && val_eq vala valb fuel)
+                (combine env1 env2) =
+                true). { rewrite Hlen, Htail. reflexivity. }
+              apply IHenv1 in H'.
+              f_equal.
+              * destruct a as [xa vala]. destruct p as [xb valb].
+                apply andb_true_iff in Hhead. destruct Hhead as [Hx Hhead].
+                apply String.eqb_eq in Hx. apply IHfuel in Hhead. rewrite Hx, Hhead. reflexivity.
+              * apply H'.
+        }
+        apply IH. apply H.
+      + f_equal. apply PeanoNat.Nat.eqb_eq in E. apply E.
+Qed.
 
 Definition environment := list (id * value).
 Definition sto := list value.
@@ -286,14 +444,14 @@ Inductive Eval : environment -> sto -> expr -> value -> sto -> Prop :=
   | E_applyE : forall env env_clo sto sto1 sto2 sto3 x ef ea eb valr vala,
     (env ; sto |- ef ==> (CloV x eb env_clo) ; sto1) -> (env ; sto1 |- ea ==> vala ; sto2) -> (((x, vala) :: env_clo) ; sto2 |- eb ==> valr ; sto3) -> env ; sto |- (ApplyE ef ea) ==> valr ; sto3
   | E_refE : forall env sto sto1 exp n value,
-    (env ; sto |- exp ==> value ; sto1) -> (length sto = n) -> env ; sto |- (RefE exp) ==> (LocV n) ; (sto1 ++ [ value ])
+    (env ; sto |- exp ==> value ; sto1) -> (length sto1 = n) -> env ; sto |- (RefE exp) ==> (LocV n) ; (sto1 ++ [ value ])
   | E_derefE : forall env sto sto1 exp n value,
     (env ; sto |- exp ==> LocV n ; sto1) -> (find_nth n sto1 = Some value) -> env ; sto |- (DerefE exp) ==> value ; sto1
   | E_updateE : forall env sto sto1 sto2 sto3 el er n valr,
     (env ; sto |- el ==> (LocV n); sto1) -> (env ; sto1 |- er ==> valr ; sto2) -> (change_nth n valr sto2 = sto3) -> env ; sto |- (UpdateE el er) ==> valr ; sto3
 where "C ; St |- e ==> v ; St'" := (Eval C St e v St').
 
-(*Fixpoint evalution_w_fuel (env : environment) (st : sto) (exp : expr) (fuel : nat) : option (value * sto) :=
+Fixpoint evaluation_w_fuel (env : environment) (st : sto) (exp : expr) (fuel : nat) : option (value * sto) :=
     match fuel with
     | 0 => None
     | S fuel' =>
@@ -302,24 +460,20 @@ where "C ; St |- e ==> v ; St'" := (Eval C St e v St').
         | BinE op exp1 exp2 =>
             match (evaluation_w_fuel env st exp1 fuel') with
             | Some (NumV n1, st1) =>
-                match (evalutiation_w_fuel env st1 exp2 fuel') with
+                match (evaluation_w_fuel env st1 exp2 fuel') with
                 | Some (NumV n2, st2) =>
                     match op with
                     | ADD => Some (NumV (n1 + n2), st2)
                     | MUL => Some (NumV (n1 * n2), st2)
                     end
-                | None => None
+                | _ => None
                 end
-            | None => None
+            | _ => None
             end
         | LetE x exp1 exp2 =>
             match (evaluation_w_fuel env st exp1 fuel') with
             | Some (valp, st1) =>
-                match (evaluation_w_fuel ((x, valp) :: env) st1 exp2 fuel') with
-                | Some (valb, st2) =>
-                    Some (valb, st2)
-                | None => None
-                end
+                evaluation_w_fuel ((x, valp) :: env) st1 exp2 fuel'
             | None => None
             end
         | VarE x =>
@@ -330,43 +484,91 @@ where "C ; St |- e ==> v ; St'" := (Eval C St e v St').
         | FuncE x ty exp => Some ((CloV x exp env), st)
         | ApplyE exp1 exp2 =>
             match (evaluation_w_fuel env st exp1 fuel') with
-            | Some ((CloV x eb env_clo), st1) =>
+            | Some (CloV x eb env_clo, st1) =>
                 match (evaluation_w_fuel env st1 exp2 fuel') with
                 | Some (vala, st2) =>
-                    match (evaluation_w_fuel ((x, vala) :: env_clo) st2 eb fuel') with
-                    | Some (valr, st3) => Some (valr, st3)
-                    | None => None
-                    end
+                    evaluation_w_fuel ((x, vala) :: env_clo) st2 eb fuel'
                 | None => None
                 end
-            | None => None
+            | _ => None
             end
         | RefE exp =>
             match (evaluation_w_fuel env st exp fuel') with
-            | Some (LocV n, st1) =>
-                if length st1 =? n then Some ((LocV n), (st1 ++ [ value ]))
-                else None
+            | Some (v, st1) =>
+                Some (LocV (length st1), st1 ++ [ v ])
             | None => None
             end
         | DerefE exp =>
-            match (evaluation env sto exp fuel') with
+            match (evaluation_w_fuel env st exp fuel') with
             | Some (LocV n, st1) =>
-                if 
-            | None => None
+                match (find_nth n st1) with
+                | Some val => Some (val, st1)
+                | None => None
+                end 
+            | _ => None
             end
         | UpdateE exp1 exp2 =>
             match (evaluation_w_fuel env st exp1 fuel') with
             | Some (LocV n, st1) =>
                 match (evaluation_w_fuel env st1 exp2 fuel') with
-                    admit.
+                | Some (valr, st2) => Some (valr, change_nth n valr st2)
+                | None => None
                 end
-            | None => None
+            | _ => None
             end
         end
-    end.*)
+    end.
 
-(* expression과 value의 boolean equality와 iff 조건 정의해야 함*)
-(*변수 정의가 조건일 때, 각 변수의 데이터 구조마다 equality를 정의해야 함*)
+Theorem Termination_evalution_w_fuel :
+forall n exp env val st1 st2, evaluation_w_fuel env st1 exp n = Some (val, st2) -> (env ; st1 |- exp ==> val ; st2).
+Proof.
+    intro fuel.
+    induction fuel.
+    - intros exp env val st1 st2 E. simpl in E. discriminate E.
+    - intro exp. induction exp; intros env val st1 st2 E; simpl in E.
+      + injection E as E1 E2. rewrite <- E1, <- E2. apply E_numE.
+      + destruct (evaluation_w_fuel env st1 exp1 fuel) eqn:E1; try (discriminate E).
+        destruct p as [v st1']. destruct v; try (discriminate E).
+        destruct (evaluation_w_fuel env st1' exp2 fuel) eqn:E2; try (discriminate E).
+        destruct p as [v st2']. destruct v; try (discriminate E).
+        destruct op.
+        * apply IHfuel in E1. apply IHfuel in E2. injection E as Evalue Estate.
+          rewrite <- Estate, <- Evalue.
+          apply (E_binE_add env st1 st1' st2' exp1 exp2 n n0 E1 E2).
+        * apply IHfuel in E1. apply IHfuel in E2. injection E as Evalue Estate.
+          rewrite <- Estate, <- Evalue.
+          apply (E_binE_mul env st1 st1' st2' exp1 exp2 n n0 E1 E2).
+      + destruct (evaluation_w_fuel env st1 exp1 fuel) eqn:E1; try (discriminate E).
+        destruct p as [valp sta]. apply IHfuel in E. apply IHfuel in E1.
+        apply (E_letE _ _ sta _ _ _ _ valp _ E1 E).
+      + destruct (find_id x env) eqn:E1; try (discriminate E).
+        injection E as Estate. rewrite <- Estate, <- H.
+        apply (E_varE _ _ _ v E1).
+      + injection E as Evalue Estate. rewrite <- Evalue, <- Estate.
+        apply E_funcE.
+      + destruct (evaluation_w_fuel env st1 exp1 fuel) eqn:E1; try (discriminate E).
+        destruct p as [valp sta]. destruct valp; try (discriminate E).
+        destruct (evaluation_w_fuel env sta exp2 fuel) eqn:E2; try (discriminate E).
+        destruct p as [vala stb].
+        apply IHfuel in E1, E2, E.
+        apply (E_applyE env env0 st1 sta stb st2 x exp1 exp2 exp val vala); assumption.
+      + destruct (evaluation_w_fuel env st1 exp fuel) eqn:E1; try (discriminate E).
+        destruct p as [value sta].  injection E as Evalue Estate.
+        rewrite <- Estate, <- Evalue. apply IHfuel in E1.
+        assert (H : (Datatypes.length sta) = (Datatypes.length sta)). { reflexivity. }
+        apply (E_refE env st1 sta exp (Datatypes.length sta) value); assumption.
+      + destruct (evaluation_w_fuel env st1 exp fuel) eqn:E1; try (discriminate E).
+        destruct p as [v sta]. destruct v; try (discriminate E).
+        destruct (find_nth loc sta) eqn:E2; try (discriminate E).
+        injection E as Evalue Estate. rewrite <- Evalue, <- Estate. apply IHfuel in E1.
+        apply (E_derefE env st1 sta exp loc v); assumption.
+      + destruct (evaluation_w_fuel env st1 exp1 fuel) eqn:E1; try (discriminate E).
+        destruct p as [v sta]. destruct v; try (discriminate E).
+        destruct (evaluation_w_fuel env sta exp2 fuel) eqn:E2; try (discriminate E).
+        destruct p as [valr stb]. injection E as Evalue Estate.
+        rewrite <- Evalue. apply IHfuel in E1, E2.
+        apply(E_updateE env st1 sta stb _ exp1 exp2 loc valr); assumption.
+Qed.
 
 Theorem Determinism_Evaluation :
 forall C sto1 sto2 sto2' exp value value',
@@ -391,7 +593,8 @@ Proof.
       rewrite H1_sto in IHE1_2. apply IHE1_2 in H4. destruct H4 as [H4_val H4_sto].
       injection H1_vars as H1_x H1_eb H1_env. rewrite H1_x, H4_val, H4_sto, H1_eb, H1_env in IHE1_3.
       apply IHE1_3 in H7. apply H7.
-    - apply IHE1 in H1. destruct H1 as [H1_val H1]. rewrite H in H4. split. f_equal. apply H4. rewrite H1, H1_val. reflexivity.
+    - apply IHE1 in H1. destruct H1 as [Hvalue Hstate]. rewrite Hstate in H. rewrite H in H4. split.
+      f_equal. apply H4. f_equal. apply Hstate. f_equal. apply Hvalue.
     - apply IHE1 in H1. destruct H1 as [H1_n H1_sto]. injection H1_n as H1_n.
       rewrite <- H1_n, <- H1_sto in H4. rewrite H in H4. injection H4 as H4.
       split. apply H4. apply H1_sto.
