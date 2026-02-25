@@ -3,7 +3,7 @@ From Stdlib Require Import String.
 From Stdlib Require Import Nat.
 From Stdlib Require Import ZArith.
 From Stdlib Require Import QArith.
-From Stdlib Require Import Reals.
+From Stdlib Require Import Floats.
 
 Definition id := string.
 Definition atom := string.
@@ -16,7 +16,7 @@ Inductive numtyp :=
     | numtyp_NAT
     | numtyp_INT
     | numtyp_RAT
-    | numtyp_REAL.
+    (*| numtyp_REAL*).
 
 Inductive texttyp :=
     | TEXT.
@@ -33,7 +33,7 @@ Inductive num :=
     | NAT : (nat) -> num
     | INT : (Z) -> num
     | RAT : (Q) -> num
-    | REAL : (R) -> num.
+    (*| REAL : (float) -> num*).
 
 Inductive boolunop :=
     | NOT.
