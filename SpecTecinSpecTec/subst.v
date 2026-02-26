@@ -13,6 +13,43 @@ Record subst := {
     subst_GRAM : list (id * sym)
 }.
 
+Definition empty_subst : subst :=
+    {|
+        subst_EXP := [];
+        subst_TYP := [];
+        subst_FUN := [];
+        subst_GRAM := []
+    |}.
+
+Definition subst_EXP_generator (l : list (id * exp)) : subst :=
+    {|
+        subst_EXP := l;
+        subst_TYP := [];
+        subst_FUN := [];
+        subst_GRAM := []
+    |}.
+Definition subst_TYP_generator (l : list (id * typ)) : subst :=
+    {|
+        subst_EXP := [];
+        subst_TYP := l;
+        subst_FUN := [];
+        subst_GRAM := []
+    |}.
+Definition subst_FUN_generator (l : list (id * id)) : subst :=
+    {|
+        subst_EXP := [];
+        subst_TYP := [];
+        subst_FUN := l;
+        subst_GRAM := []
+    |}.
+Definition subst_GRAM_generator (l : list (id * sym)) : subst :=
+    {|
+        subst_EXP := [];
+        subst_TYP := [];
+        subst_FUN := [];
+        subst_GRAM := l
+    |}.
+
 Definition concat_subst (s1 s2 : subst) : subst :=
     {|
         subst_EXP := s1.(subst_EXP) ++ s2.(subst_EXP);

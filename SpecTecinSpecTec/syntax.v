@@ -169,9 +169,9 @@ with prem :=
     | prem_ITER : (prem) -> (iter) -> (list (id * exp)) -> prem
 with dec :=
     | dec_TYP : (id) -> (list param) -> (list inst) -> dec
-    | dec_REL : (id) -> (list param) -> (list rul) -> dec
-    | dec_FUN : (id) -> (list param) -> (list clause) -> dec
-    | dec_GRAM : (id) -> (list param) -> (list prod) -> dec
+    | dec_REL : (id) -> (list param) -> (typ) -> (list rul) -> dec
+    | dec_FUN : (id) -> (list param) -> (typ) -> (list clause) -> dec
+    | dec_GRAM : (id) -> (list param) -> (typ) -> (list prod) -> dec
     | dec_REC : (list dec) -> dec
 with inst :=
     | INST : (list param) -> (list arg) -> (deftyp) -> inst
