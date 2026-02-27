@@ -4,32 +4,60 @@ Require Import primitives.
 Require Import subst.
 
 From Stdlib Require Import List.
+From Stdlib Require Import String.
 Import ListNotations.
 
-(* disjoint | equiv *)
+Fixpoint disjoint {X : Type} (xs : list X) : Prop :=
+    match xs with
+    | nil => True
+    | cons x xs_rest =>
+        (In x xs_rest -> False) /\ (disjoint xs_rest)
+    end.
 
-Fixpoint transpose_aux (X : Type) (remains : list (list X)) (nexts : list (list X)) : option (list X * list (list X)) :=
-    match remains with
-    | nil => Some (nil, nexts)
-    | remain :: remains' =>
-        match remain with
+Definition transpose_aux (X : Type) (xss : list (list X)) : option (list X * list (list X)) :=
+    match xss with
+    | nil => Some (nil, nil)
+    | first_row :: rows_rest =>
+        match first_row with
         | nil => None
-        | head :: rest =>
-            match transpose_aux X remains' (rest :: nexts) with
-            | Some (xs, nexts') => Some (head :: xs, nexts')
+        | h :: t =>
+            match (fix help (rs : list (list X)) :=
+                match rs with
+                | nil => Some (nil, nil)
+                | r :: rs_rest =>
+                    match r with
+                    | nil => None
+                    | h' :: t' => 
+                        match help rs_rest with
+                        | Some (hs, ts) => Some (h' :: hs, t' :: ts)
+                        | None => None
+                        end
+                    end
+                end) rows_rest with
+            | Some (hs, ts) => Some (h :: hs, t :: ts)
             | None => None
             end
         end
     end.
 
-Fixpoint transpose (X : Type) (fuel : nat) (xss : list (list X)) : list (list X) :=
-    match fuel with
-    | O => nil
-    | Datatypes.S fuel' =>
-        match transpose_aux X xss nil with
-        | Some (heads, nexts) => heads :: (transpose X fuel' nexts)
-        | None => nil
+Fixpoint transpose_acc (X : Type) (n : nat) (xss : list (list X)) : option (list (list X)) :=
+    match n with
+    | O => Some nil
+    | Datatypes.S n' =>
+        match transpose_aux X xss with
+        | None => None
+        | Some (heads, nexts) =>
+            match transpose_acc X n' nexts with
+            | None => None
+            | Some rest => Some (heads :: rest)
+            end
         end
+    end.
+
+Definition transpose (X : Type) (xss : list (list X)) : option (list (list X)) :=
+    match xss with
+    | nil => Some nil
+    | col1 :: _ => transpose_acc X (List.length col1) xss
     end.
 
 Fixpoint list_element {X : Type} (f : nat -> X) (len : nat) : list X :=
@@ -41,8 +69,8 @@ Fixpoint list_element {X : Type} (f : nat -> X) (len : nat) : list X :=
 Fixpoint Step_exp_SUB_TUP_aux (es : list exp) (tups : list (id * typ)) : option (list (id * exp)) :=
     match es, tups with
     | [], [] => Some nil
-    | e :: es', tup :: tups' =>
-        match Step_exp_SUB_TUP_aux es' tups' with
+    | e :: es_rest, tup :: tups_rest =>
+        match Step_exp_SUB_TUP_aux es_rest tups_rest with
         | None => None
         | Some ls =>
             let (x, _) := tup in
@@ -71,328 +99,354 @@ Fixpoint change_nth {A : Type} (n : nat) (val : A) (l : list A) : list A :=
 Definition env_EXP_one (x : id) (t : typ) : E := env.env_EXP_generator [(x, t)].
 
 Inductive Expand_typ : S -> typ -> deftyp -> Prop :=
-    | Expand_typ_plain : forall (st : S) (t : plaintyp), Expand_typ st (typ_plain t) (deftyp_ALIAS (typ_plain t))
-    | Expand_typ_alias : forall (st : S) x args t dt,
-        (Expand_typ st (typ_VAR x args) (deftyp_ALIAS t)) ->
-        (Expand_typ st t dt) ->
-        Expand_typ st (typ_VAR x args) dt
-    | Expand_typ_step : forall (st : S) x args ps insts qs args' s dt,
-        (In (x, (ps, insts)) st.(S_TYP)) ->
+    | Expand_typ_plain : forall sub (t : plaintyp), Expand_typ sub (typ_plain t) (deftyp_ALIAS (typ_plain t))
+    | Expand_typ_alias : forall sub x args t dt,
+        (Expand_typ sub (typ_VAR x args) (deftyp_ALIAS t)) ->
+        (Expand_typ sub t dt) ->
+        Expand_typ sub (typ_VAR x args) dt
+    | Expand_typ_step : forall sub x args ps insts qs args' s dt,
+        (In (x, (ps, insts)) sub.(S_TYP)) ->
         (In (INST qs args' dt) insts) ->
-        (Match_args st args qs args' s) ->
-        Expand_typ st (typ_VAR x args) (subst_deftyp s dt)
+        (Match_args sub args qs args' s) ->
+        Expand_typ sub (typ_VAR x args) (subst_deftyp s dt)
 with Eq_typ : S -> typ -> typ -> Prop :=
-    | Eq_typ_prop : forall (st : S) t1 t2 t1' t2',
-        (Reduce_typ st t1 t1') ->
-        (Reduce_typ st t2 t2') ->
-        (* t1' = t2' -> *)
-        Eq_typ st t1 t2
+    | Eq_typ_prop : forall sub t1 t2 t1' t2',
+        (Reduce_typ sub t1 t1') ->
+        (Reduce_typ sub t2 t2') ->
+        (t1' = t2') ->
+        Eq_typ sub t1 t2
 with Reduce_typ : S -> typ -> typ -> Prop :=
-    | Reduce_typ_normal : forall (st : S) t, Reduce_typ st t t
-    | Reduce_typ_step : forall (st : S) t t' t'',
-        (Step_typ st t t') ->
-        (Reduce_typ st t' t'') ->
-        Reduce_typ st t t''
+    | Reduce_typ_normal : forall sub t, Reduce_typ sub t t
+    | Reduce_typ_step : forall sub t t' t'',
+        (Step_typ sub t t') ->
+        (Reduce_typ sub t' t'') ->
+        Reduce_typ sub t t''
 with Step_typ : S -> typ -> typ -> Prop :=
-    | Step_typ_VAR_ctx : forall (st : S) x args argn argn' n,
+    | Step_typ_VAR_ctx : forall sub x args argn argn' n,
         (find_nth n args = Some argn) ->
-        (Step_arg st argn argn') ->
-        Step_typ st (typ_VAR x args) (typ_VAR x (change_nth n argn' args))
-    | Step_typ_VAR_apply : forall (st : S) x args t,
-        (Expand_typ st (typ_VAR x args) (deftyp_ALIAS t)) ->
-        Step_typ st (typ_VAR x args) t
-    | Step_typ_TUP_ctx : forall (st : S) tups xn tn tn' n,
+        (Step_arg sub argn argn') ->
+        Step_typ sub (typ_VAR x args) (typ_VAR x (change_nth n argn' args))
+    | Step_typ_VAR_apply : forall sub x args t,
+        (Expand_typ sub (typ_VAR x args) (deftyp_ALIAS t)) ->
+        Step_typ sub (typ_VAR x args) t
+    | Step_typ_TUP_ctx : forall sub tups xn tn tn' n,
         (find_nth n tups = Some (xn, tn)) ->
-        (Step_typ st tn tn') ->
-        (Step_typ st (typ_plain (plaintyp_TUP tups)) (typ_plain (plaintyp_TUP (change_nth n (xn, tn') tups))))
-    | Step_typ_ITER_ctx : forall (st : S) t it t',
-        (Step_typ st t t') ->
-        (Step_typ st (typ_plain (plaintyp_ITER t it)) (typ_plain (plaintyp_ITER t' it)))
+        (Step_typ sub tn tn') ->
+        (Step_typ sub (typ_plain (plaintyp_TUP tups)) (typ_plain (plaintyp_TUP (change_nth n (xn, tn') tups))))
+    | Step_typ_ITER_ctx : forall sub t it t',
+        (Step_typ sub t t') ->
+        (Step_typ sub (typ_plain (plaintyp_ITER t it)) (typ_plain (plaintyp_ITER t' it)))
 with Reduce_exp : S -> exp -> exp -> Prop :=
-    | Reduce_exp_normal : forall (st : S) e, Reduce_exp st e e
-    | Reduce_exp_step : forall (st : S) e e' e'',
-        (Step_exp st e e') ->
-        (Reduce_exp st e' e'') ->
-        Reduce_exp st e e''
+    | Reduce_exp_normal : forall sub e, Reduce_exp sub e e
+    | Reduce_exp_step : forall sub e e' e'',
+        (Step_exp sub e e') ->
+        (Reduce_exp sub e' e'') ->
+        Reduce_exp sub e e''
 with Step_exp : S -> exp -> exp -> Prop :=
-    | Step_exp_UN_ctx : forall (st : S) op e e',
-        (Step_exp st e e') ->
-        Step_exp st (exp_UN op e) (exp_UN op e')
-    | Step_exp_UN_BOOOL : forall (st : S) (op : boolunop) b, Step_exp st (exp_UN op (exp_BOOL b)) (exp_BOOL (boolun op b))
-    | Step_exp_UN_NUM : forall (st : S) (op : numunop) (n : num), Step_exp st (exp_UN op (exp_NUM n)) (exp_NUM (numun op n))
-    | Step_exp_BIN_ctx1 : forall (st : S) op e1 e2 e1',
-        (Step_exp st e1 e1') ->
-        Step_exp st (exp_BIN op e1 e2) (exp_BIN op e1' e2)
-    | Step_exp_BIN_ctx2 : forall (st : S) op e1 e2 e2',
-        (Step_exp st e2 e2') ->
-        Step_exp st (exp_BIN op e1 e2) (exp_BIN op e1 e2')
-    | Step_exp_BIN_BOOL : forall (st : S) (op : boolbinop) b1 b2, Step_exp st (exp_BIN op (exp_BOOL b1) (exp_BOOL b2)) (exp_BOOL (boolbin op b1 b2))
-    | Step_exp_BIN_NUM : forall (st : S) (op : numbinop) (n1 n2 n : num), 
+    | Step_exp_UN_ctx : forall sub op e e',
+        (Step_exp sub e e') ->
+        Step_exp sub (exp_UN op e) (exp_UN op e')
+    | Step_exp_UN_BOOOL : forall sub (op : boolunop) b, Step_exp sub (exp_UN op (exp_BOOL b)) (exp_BOOL (boolun op b))
+    | Step_exp_UN_NUM : forall sub (op : numunop) (n : num), Step_exp sub (exp_UN op (exp_NUM n)) (exp_NUM (numun op n))
+    | Step_exp_BIN_ctx1 : forall sub op e1 e2 e1',
+        (Step_exp sub e1 e1') ->
+        Step_exp sub (exp_BIN op e1 e2) (exp_BIN op e1' e2)
+    | Step_exp_BIN_ctx2 : forall sub op e1 e2 e2',
+        (Step_exp sub e2 e2') ->
+        Step_exp sub (exp_BIN op e1 e2) (exp_BIN op e1 e2')
+    | Step_exp_BIN_BOOL : forall sub (op : boolbinop) b1 b2, Step_exp sub (exp_BIN op (exp_BOOL b1) (exp_BOOL b2)) (exp_BOOL (boolbin op b1 b2))
+    | Step_exp_BIN_NUM : forall sub (op : numbinop) (n1 n2 n : num), 
         (numbin op n1 n2 = Some n) ->
-        Step_exp st (exp_BIN op (exp_NUM n1) (exp_NUM n2)) (exp_NUM n)
-    | Step_exp_CMP_ctx1 : forall (st : S) op e1 e2 e1',
-        (Step_exp st e1 e1') ->
-        Step_exp st (exp_CMP op e1 e2) (exp_CMP op e1' e2)
-    | Step_exp_CMP_ctx2 : forall (st : S) op e1 e2 e2',
-        (Step_exp st e2 e2') ->
-        Step_exp st (exp_CMP op e1 e2) (exp_CMP op e1 e2')
-    | Step_exp_CMP_EQ_true : forall (st : S) e1 e2,
-        (* e1 = e2 -> *)
-        Step_exp st (exp_CMP (cmpop_poly EQ) e1 e2) (exp_BOOL true)
-    | Step_exp_CMP_EQ_false : forall (st : S) e1 e2,
-        (* e1 =/= e2 -> *)
-        Step_exp st (exp_CMP (cmpop_poly EQ) e1 e2) (exp_BOOL false)
-    | Step_exp_CMP_NE_true : forall (st : S) e1 e2,
-        (* e1 =/= e2 -> *)
-        Step_exp st (exp_CMP (cmpop_poly NE) e1 e2) (exp_BOOL true)
-    | Step_exp_CMP_NE_false : forall (st : S) e1 e2,
-        (* e1 == e2 -> *)
-        Step_exp st (exp_CMP (cmpop_poly NE) e1 e2) (exp_BOOL false)
-    | Step_exp_CMP_NUM : forall (st : S) (op : numcmpop) (n1 n2 : num) (b : bool),
+        Step_exp sub (exp_BIN op (exp_NUM n1) (exp_NUM n2)) (exp_NUM n)
+    | Step_exp_CMP_ctx1 : forall sub op e1 e2 e1',
+        (Step_exp sub e1 e1') ->
+        Step_exp sub (exp_CMP op e1 e2) (exp_CMP op e1' e2)
+    | Step_exp_CMP_ctx2 : forall sub op e1 e2 e2',
+        (Step_exp sub e2 e2') ->
+        Step_exp sub (exp_CMP op e1 e2) (exp_CMP op e1 e2')
+    | Step_exp_CMP_EQ_true : forall sub e1 e2,
+        (e1 = e2) ->
+        Step_exp sub (exp_CMP (cmpop_poly EQ) e1 e2) (exp_BOOL true)
+    | Step_exp_CMP_EQ_false : forall sub e1 e2,
+        (e1 = e2 -> False) ->
+        Step_exp sub (exp_CMP (cmpop_poly EQ) e1 e2) (exp_BOOL false)
+    | Step_exp_CMP_NE_true : forall sub e1 e2,
+        (e1 = e2 -> False) ->
+        Step_exp sub (exp_CMP (cmpop_poly NE) e1 e2) (exp_BOOL true)
+    | Step_exp_CMP_NE_false : forall sub e1 e2,
+        (e1 = e2) ->
+        Step_exp sub (exp_CMP (cmpop_poly NE) e1 e2) (exp_BOOL false)
+    | Step_exp_CMP_NUM : forall sub (op : numcmpop) (n1 n2 : num) (b : bool),
         (numcmp op n1 n2 = Some b) ->
-        Step_exp st (exp_CMP (cmpop_num op) (exp_NUM n1) (exp_NUM n2)) (exp_BOOL b)
-    | Step_exp_OPT_ctx : forall (st : S) e e',
-        (Step_exp st e e') ->
-        Step_exp st (exp_OPT (Some e)) (exp_OPT (Some e'))
-    | Step_exp_LIST_ctx : forall (st : S) es n en en',
-        (find_nth n es = Some en) ->
-        (Step_exp st en en') ->
-        Step_exp st (exp_LIST es) (exp_LIST (change_nth n en' es))
-    | Step_exp_TUP_ctx : forall (st : S) es n en en',
-        (find_nth n es = Some en) ->
-        (Step_exp st en en') ->
-        Step_exp st (exp_TUP es) (exp_TUP (change_nth n en' es))
-    | Step_exp_STR_ctx : forall (st : S) aes n an en en',
-        (find_nth n aes = Some (an, en)) ->
-        (Step_exp st en en') ->
-        Step_exp st (exp_STR aes) (exp_STR (change_nth n (an, en') aes))
-    | Step_exp_INJ_ctx : forall (st : S) m e e',
-        (Step_exp st e e') ->
-        Step_exp st (exp_INJ m e) (exp_INJ m e')
-    | Step_exp_LIFT_ctx : forall (st : S) e e',
-        (Step_exp st e e') ->
-        Step_exp st (exp_LIFT e) (exp_LIFT e')
-    | Step_exp_LIFT_none : forall (st : S), Step_exp st (exp_LIFT (exp_OPT None)) (exp_LIST [])
-    | Step_exp_LIFT_some : forall (st : S) e, Step_exp st (exp_LIFT (exp_OPT (Some e))) (exp_LIST [e])
-    | Step_exp_SEL_ctx : forall (st : S) e n e',
-        (Step_exp st e e') ->
-        Step_exp st (exp_SEL e n) (exp_SEL e' n)
-    | Step_exp_SEL_tup : forall (st : S) es n en,
-        (find_nth n es = Some en) ->
-        Step_exp st (exp_SEL (exp_TUP es) n) en
-    | Step_exp_LEN_ctx : forall (st : S) e e',
-        (Step_exp st e e') ->
-        Step_exp st (exp_LEN e) (exp_LEN e')
-    | Step_exp_LEN_list : forall (st : S) es,
-        Step_exp st (exp_LEN (exp_LIST es)) (exp_NUM (NAT (List.length es)))
-    | Step_exp_MEM_ctx1 : forall (st : S) e1 e2 e1',
-        (Step_exp st e1 e1') ->
-        Step_exp st (exp_MEM e1 e2) (exp_MEM e1' e2)
-    | Step_exp_MEM_ctx2 : forall (st : S) e1 e2 e2',
-        (Step_exp st e2 e2') ->
-        Step_exp st (exp_MEM e1 e2) (exp_MEM e1 e2')
-    | Step_exp_MEM_OPT_true : forall (st : S) e1 e2,
-        (* e1 = e2 -> *)
-        Step_exp st (exp_MEM e1 (exp_OPT (Some e2))) (exp_BOOL true)
-    | Step_exp_MEM_OPT_false_Some : forall (st : S) e1 e2,
-        (* (e1 =/= e2) -> *)
-        Step_exp st (exp_MEM e1 (exp_OPT (Some e2))) (exp_BOOL false)
-    | Step_exp_MEM_LIST_true : forall (st : S) e1 es n,
+        Step_exp sub (exp_CMP (cmpop_num op) (exp_NUM n1) (exp_NUM n2)) (exp_BOOL b)
+    | Step_exp_OPT_ctx : forall sub e e',
+        (Step_exp sub e e') ->
+        Step_exp sub (exp_OPT (Some e)) (exp_OPT (Some e'))
+    | Step_exp_LIST_ctx : forall sub es n e_n e_n',
+        (find_nth n es = Some e_n) ->
+        (Step_exp sub e_n e_n') ->
+        Step_exp sub (exp_LIST es) (exp_LIST (change_nth n e_n' es))
+    | Step_exp_TUP_ctx : forall sub es n e_n e_n',
+        (find_nth n es = Some e_n) ->
+        (Step_exp sub e_n e_n') ->
+        Step_exp sub (exp_TUP es) (exp_TUP (change_nth n e_n' es))
+    | Step_exp_STR_ctx : forall sub aes n an e_n e_n',
+        (find_nth n aes = Some (an, e_n)) ->
+        (Step_exp sub e_n e_n') ->
+        Step_exp sub (exp_STR aes) (exp_STR (change_nth n (an, e_n') aes))
+    | Step_exp_INJ_ctx : forall sub m e e',
+        (Step_exp sub e e') ->
+        Step_exp sub (exp_INJ m e) (exp_INJ m e')
+    | Step_exp_LIFT_ctx : forall sub e e',
+        (Step_exp sub e e') ->
+        Step_exp sub (exp_LIFT e) (exp_LIFT e')
+    | Step_exp_LIFT_none : forall sub, Step_exp sub (exp_LIFT (exp_OPT None)) (exp_LIST [])
+    | Step_exp_LIFT_some : forall sub e, Step_exp sub (exp_LIFT (exp_OPT (Some e))) (exp_LIST [e])
+    | Step_exp_SEL_ctx : forall sub e n e',
+        (Step_exp sub e e') ->
+        Step_exp sub (exp_SEL e n) (exp_SEL e' n)
+    | Step_exp_SEL_tup : forall sub es n e_n,
+        (find_nth n es = Some e_n) ->
+        Step_exp sub (exp_SEL (exp_TUP es) n) e_n
+    | Step_exp_LEN_ctx : forall sub e e',
+        (Step_exp sub e e') ->
+        Step_exp sub (exp_LEN e) (exp_LEN e')
+    | Step_exp_LEN_list : forall sub es,
+        Step_exp sub (exp_LEN (exp_LIST es)) (exp_NUM (NAT (List.length es)))
+    | Step_exp_MEM_ctx1 : forall sub e1 e2 e1',
+        (Step_exp sub e1 e1') ->
+        Step_exp sub (exp_MEM e1 e2) (exp_MEM e1' e2)
+    | Step_exp_MEM_ctx2 : forall sub e1 e2 e2',
+        (Step_exp sub e2 e2') ->
+        Step_exp sub (exp_MEM e1 e2) (exp_MEM e1 e2')
+    | Step_exp_MEM_OPT_true : forall sub e1 e2,
+        (e1 = e2) -> 
+        Step_exp sub (exp_MEM e1 (exp_OPT (Some e2))) (exp_BOOL true)
+    | Step_exp_MEM_OPT_false_Some : forall sub e1 e2,
+        (e1 = e2 -> False) ->
+        Step_exp sub (exp_MEM e1 (exp_OPT (Some e2))) (exp_BOOL false)
+    | Step_exp_MEM_LIST_true : forall sub e1 es n,
         (find_nth n es = Some e1) ->
-        Step_exp st (exp_MEM e1 (exp_LIST es)) (exp_BOOL true)
-    | Step_exp_MEM_LIST_false : forall (st : S) e1 es,
-        (* forallb e, In e es -> e1 =/= e) -> *)
-        Step_exp st (exp_MEM e1 (exp_LIST es)) (exp_BOOL false)
-    | Step_exp_CAT_ctx1 : forall (st : S) e1 e2 e1',
-        (Step_exp st e1 e1') ->
-        Step_exp st (exp_CAT e1 e2) (exp_CAT e1' e2)
-    | Step_exp_CAT_ctx2 : forall (st : S) e1 e2 e2',
-        (Step_exp st e2 e2') ->
-        Step_exp st (exp_CAT e1 e2) (exp_CAT e1 e2')
-    | Step_exp_CAT_opt1 : forall (st : S) e1, Step_exp st (exp_CAT (exp_OPT (Some e1)) (exp_OPT None)) (exp_OPT (Some e1))
-    | Step_exp_CAT_opt2 : forall (st : S) e2, Step_exp st (exp_CAT (exp_OPT None) (exp_OPT (Some e2))) (exp_OPT (Some e2))
-    (*| Step_exp_CAT_list : forall S e1s e2s, Step_exp S (exp_CAT (exp_LIST e1s) (exp_LIST e2s)) (exp_LIST e1s ++ e2s)
-    | Step_exp_CAT_str : forall S *)
-    | Step_exp_ACC_ctx1 : forall (st : S) e p e',
-        (Step_exp st e e') ->
-        Step_exp st (exp_ACC e p) (exp_ACC e' p)
-    | Step_exp_ACC_ctx2 : forall (st : S) e p p',
-        (Step_path st p p') ->
-        Step_exp st (exp_ACC e p) (exp_ACC e p')
-    | Step_exp_ACC_ROOT : forall (st : S) e, Step_exp st (exp_ACC e path_ROOT) e
-    | Step_exp_ACC_IDX : forall (st : S) e p n es en,
-        (Step_exp st (exp_ACC e p) (exp_LIST es)) ->
-        (find_nth n es = Some en) ->
-        Step_exp st (exp_ACC e (path_IDX p (exp_NUM (NAT (n - 1))))) en
-    (*| Step_exp_ACC_SLICE : forall (st : S) e p n m es es',
-        (Step_exp st (exp_ACC e p) (exp_LIST es)) ->*)
-    | Step_exp_ACC_DOT : forall (st : S) e p a aes n en,
-        (Step_exp st (exp_ACC e p) (exp_STR aes)) ->
-        (find_nth n aes = Some (a, en)) ->
-        Step_exp st (exp_ACC e (path_DOT p a)) en
-    | Step_exp_ACC_PROJ : forall (st : S) e p m e',
-        (Step_exp st (exp_ACC e p) (exp_INJ m e')) ->
-        Step_exp st (exp_ACC e (path_PROJ p m)) e'
-    | Step_exp_UPD_ctx1 : forall (st : S) e1 p e2 e1',
-        (Step_exp st e1 e1') ->
-        Step_exp st (exp_UPD e1 p e2) (exp_UPD e1' p e2)
-    | Step_exp_UPD_ctx2 : forall (st : S) e1 p e2 p',
-        (Step_path st p p') ->
-        Step_exp st (exp_UPD e1 p e2) (exp_UPD e1 p' e2)
-    | Step_exp_UPD_ctx3 : forall (st : S) e1 p e2 e2',
-        (Step_exp st e2 e2') ->
-        Step_exp st (exp_UPD e1 p e2) (exp_UPD e1 p e2')
-    | Step_exp_UPD_ROOT : forall (st : S) e1 e2, Step_exp st (exp_UPD e1 path_ROOT e2) e2
-    | Step_exp_UPD_THE : forall (st : S) e1 p e2 e',
-        (Step_exp st (exp_ACC e1 p) (exp_OPT (Some e'))) ->
-        Step_exp st (exp_UPD e1 (path_THE p) e2) (exp_UPD e1 p (exp_OPT (Some e2)))
-    | Step_exp_UPD_IDX : forall (st : S) e1 p n e2 es,
-        (Step_exp st (exp_ACC e1 p) (exp_LIST es)) ->
+        Step_exp sub (exp_MEM e1 (exp_LIST es)) (exp_BOOL true)
+    | Step_exp_MEM_LIST_false : forall sub e1 es,
+        (forall e, In e es -> (e1 = e -> False)) ->
+        Step_exp sub (exp_MEM e1 (exp_LIST es)) (exp_BOOL false)
+    | Step_exp_CAT_ctx1 : forall sub e1 e2 e1',
+        (Step_exp sub e1 e1') ->
+        Step_exp sub (exp_CAT e1 e2) (exp_CAT e1' e2)
+    | Step_exp_CAT_ctx2 : forall sub e1 e2 e2',
+        (Step_exp sub e2 e2') ->
+        Step_exp sub (exp_CAT e1 e2) (exp_CAT e1 e2')
+    | Step_exp_CAT_opt1 : forall sub e1, Step_exp sub (exp_CAT (exp_OPT (Some e1)) (exp_OPT None)) (exp_OPT (Some e1))
+    | Step_exp_CAT_opt2 : forall sub e2, Step_exp sub (exp_CAT (exp_OPT None) (exp_OPT (Some e2))) (exp_OPT (Some e2))
+    | Step_exp_CAT_list : forall sub e1s e2s, Step_exp sub (exp_CAT (exp_LIST e1s) (exp_LIST e2s)) (exp_LIST (e1s ++ e2s))
+    | Step_exp_CAT_str : forall sub args es1 es2, Step_exp sub (exp_CAT (exp_STR (combine args es1)) (exp_STR (combine args es2))) (exp_STR (combine args (map (fun e12 => exp_CAT (fst e12) (snd e12)) (combine es1 es2))))
+    | Step_exp_ACC_ctx1 : forall sub e p e',
+        (Step_exp sub e e') ->
+        Step_exp sub (exp_ACC e p) (exp_ACC e' p)
+    | Step_exp_ACC_ctx2 : forall sub e p p',
+        (Step_path sub p p') ->
+        Step_exp sub (exp_ACC e p) (exp_ACC e p')
+    | Step_exp_ACC_ROOT : forall sub e, Step_exp sub (exp_ACC e path_ROOT) e
+    | Step_exp_ACC_IDX : forall sub e p n es e_n,
+        (Step_exp sub (exp_ACC e p) (exp_LIST es)) ->
+        (find_nth n es = Some e_n) ->
+        Step_exp sub (exp_ACC e (path_IDX p (exp_NUM (NAT (n - 1))))) e_n
+    | Step_exp_ACC_SLICE : forall sub e p n m es1 es2 es3,
+        (Step_exp sub (exp_ACC e p) (exp_LIST (es1 ++ es2 ++ es3))) ->
+        (List.length es1 = n) ->
+        (List.length es2 = m) ->
+        Step_exp sub (exp_ACC e (path_SLICE p (NAT n) (NAT m))) (exp_LIST es2)
+    | Step_exp_ACC_DOT : forall sub e p a aes n e_n,
+        (Step_exp sub (exp_ACC e p) (exp_STR aes)) ->
+        (find_nth n aes = Some (a, e_n)) ->
+        Step_exp sub (exp_ACC e (path_DOT p a)) e_n
+    | Step_exp_ACC_PROJ : forall sub e p m e',
+        (Step_exp sub (exp_ACC e p) (exp_INJ m e')) ->
+        Step_exp sub (exp_ACC e (path_PROJ p m)) e'
+    | Step_exp_UPD_ctx1 : forall sub e1 p e2 e1',
+        (Step_exp sub e1 e1') ->
+        Step_exp sub (exp_UPD e1 p e2) (exp_UPD e1' p e2)
+    | Step_exp_UPD_ctx2 : forall sub e1 p e2 p',
+        (Step_path sub p p') ->
+        Step_exp sub (exp_UPD e1 p e2) (exp_UPD e1 p' e2)
+    | Step_exp_UPD_ctx3 : forall sub e1 p e2 e2',
+        (Step_exp sub e2 e2') ->
+        Step_exp sub (exp_UPD e1 p e2) (exp_UPD e1 p e2')
+    | Step_exp_UPD_ROOT : forall sub e1 e2, Step_exp sub (exp_UPD e1 path_ROOT e2) e2
+    | Step_exp_UPD_THE : forall sub e1 p e2 e',
+        (Step_exp sub (exp_ACC e1 p) (exp_OPT (Some e'))) ->
+        Step_exp sub (exp_UPD e1 (path_THE p) e2) (exp_UPD e1 p (exp_OPT (Some e2)))
+    | Step_exp_UPD_IDX : forall sub e1 p n e2 es,
+        (Step_exp sub (exp_ACC e1 p) (exp_LIST es)) ->
         (1 <= n <= List.length es) ->
-        Step_exp st (exp_UPD e1 (path_IDX p (exp_NUM (NAT (n - 1)))) e2) (exp_UPD e1 p (exp_LIST (change_nth n e2 es)))
-    (*| Step_exp_UPD_SLICE *)
-    | Step_exp_UPD_DOT : forall (st : S) e1 p a e2 aes n e',
-        (Step_exp st (exp_ACC e1 p) (exp_STR aes)) ->
+        Step_exp sub (exp_UPD e1 (path_IDX p (exp_NUM (NAT (n - 1)))) e2) (exp_UPD e1 p (exp_LIST (change_nth n e2 es)))
+    | Step_exp_UPD_SLICE : forall sub e1 p n m es1 es2 es3 es2',
+        (Step_exp sub (exp_ACC e1 p)) (exp_LIST (es1 ++ es2 ++ es3)) ->
+        (List.length es1 = n) ->
+        (List.length es2 = m) ->
+        Step_exp sub (exp_UPD e1 (path_SLICE p (NAT n) (NAT m)) (exp_LIST es2')) (exp_UPD e1 p (exp_LIST (es1 ++ es2' ++ es3)))
+    | Step_exp_UPD_DOT : forall sub e1 p a e2 aes n e',
+        (Step_exp sub (exp_ACC e1 p) (exp_STR aes)) ->
         (find_nth n aes = Some (a, e')) ->
-        Step_exp st (exp_UPD e1 (path_DOT p a) e2) (exp_UPD e1 p (exp_STR (change_nth n (a, e2) aes)))
-    | Step_exp_UPD_PROJ : forall (st : S) e1 p m e2 e',
-        (Step_exp st (exp_ACC e1 p) (exp_INJ m e')) ->
-        Step_exp st (exp_UPD e1 (path_PROJ p m) e2) (exp_UPD e1 p (exp_INJ m e2))
-    | Step_exp_EXT : forall (st : S) e1 p e2, Step_exp st (exp_EXT e1 p e2) (exp_UPD e1 p (exp_CAT (exp_ACC e1 p) e2))
-    | Step_exp_ITER_ctx1 : forall (st : S) e it eps e',
-        (Step_exp st e e') ->
-        Step_exp st (exp_ITER e it eps) (exp_ITER e' it eps)
-    | Step_exp_ITER_ctx2 : forall (st : S) e it eps it',
-        (Step_iter st it it') ->
-        Step_exp st (exp_ITER e it eps) (exp_ITER e it' eps)
-    | Step_exp_ITER_ctx3 : forall (st : S) e it eps n xn en en',
-        (find_nth n eps = Some (xn, en)) ->
-        (Step_exp st en en') ->
-        Step_exp st (exp_ITER e it eps) (exp_ITER e it (change_nth n (xn, en') eps))
-    (*| Step_exp_ITER *)
-    | Step_exp_CALL_ctx : forall (st : S) x args n argn argn',
+        Step_exp sub (exp_UPD e1 (path_DOT p a) e2) (exp_UPD e1 p (exp_STR (change_nth n (a, e2) aes)))
+    | Step_exp_UPD_PROJ : forall sub e1 p m e2 e',
+        (Step_exp sub (exp_ACC e1 p) (exp_INJ m e')) ->
+        Step_exp sub (exp_UPD e1 (path_PROJ p m) e2) (exp_UPD e1 p (exp_INJ m e2))
+    | Step_exp_EXT : forall sub e1 p e2, Step_exp sub (exp_EXT e1 p e2) (exp_UPD e1 p (exp_CAT (exp_ACC e1 p) e2))
+    | Step_exp_ITER_ctx1 : forall sub e it eps e',
+        (Step_exp sub e e') ->
+        Step_exp sub (exp_ITER e it eps) (exp_ITER e' it eps)
+    | Step_exp_ITER_ctx2 : forall sub e it eps it',
+        (Step_iter sub it it') ->
+        Step_exp sub (exp_ITER e it eps) (exp_ITER e it' eps)
+    | Step_exp_ITER_ctx3 : forall sub e it eps n xn e_n e_n',
+        (find_nth n eps = Some (xn, e_n)) ->
+        (Step_exp sub e_n e_n') ->
+        Step_exp sub (exp_ITER e it eps) (exp_ITER e it (change_nth n (xn, e_n') eps))
+    | Step_exp_ITER_QUEST_Some : forall sub e xs es, Step_exp sub (exp_ITER e iter_QUEST (combine xs (map (fun e' => exp_OPT (Some e')) es))) (exp_OPT (Some (subst_exp (subst_EXP_generator (combine xs es)) e)))
+    | Step_exp_ITER_QUEST_None : forall sub e xs, Step_exp sub (exp_ITER e iter_QUEST (map (fun x => (x, exp_OPT None)) xs)) (exp_OPT None)
+    | Step_exp_ITER_PLUS : forall sub e es1_head es1_tail ess x1 xs, Step_exp sub (exp_ITER e iter_PLUS ((x1, exp_LIST (es1_head :: es1_tail)) :: (combine xs (map (fun es => exp_LIST es) ess)))) (exp_ITER e iter_STAR ((x1, exp_LIST (es1_head :: es1_tail)) :: (combine xs (map (fun es => exp_LIST es) ess))))
+    | Step_exp_ITER_STAR : forall sub e x xs es ess n,
+        (List.length es = n) ->
+        Step_exp sub (exp_ITER e iter_STAR ((x, exp_LIST es) :: (combine xs (map (fun es' => exp_LIST es') ess)))) (exp_ITER e (iter_SUP None (NAT n)) ((x, exp_LIST es) :: (combine xs (map (fun es' => exp_LIST es') ess))))
+    | Step_exp_ITER_SUP_eps : forall sub e en xs ess y, Step_exp sub (exp_ITER e (iter_SUP None en) (combine xs (map (fun es' => exp_LIST es') ess))) (exp_ITER e (iter_SUP (Some y) en) (combine xs (map (fun es' => exp_LIST es') ess)))
+    | Step_exp_ITER_SUP : forall sub e y n xs ess ess_transposed,
+        (forall es, In es ess -> List.length es = n) ->
+        (transpose exp ess = Some ess_transposed) ->
+        Step_exp sub
+          (exp_ITER e (iter_SUP (Some y) (NAT n)) (combine xs (map (fun es => exp_LIST es) ess)))
+          (exp_LIST (map (fun esi => subst_exp (subst_EXP_generator ((combine xs (fst esi)) ++ [(y, exp_NUM (NAT (snd esi)))])) e) (combine ess_transposed (list_element (fun num => num) n))))
+    | Step_exp_CALL_ctx : forall sub x args n argn argn',
         (find_nth n args = Some argn) ->
-        (Step_arg st argn argn') ->
-        Step_exp st (exp_CALL x args) (exp_CALL x (change_nth n argn' args))
-    | Step_exp_CALL_apply : forall (st : S) x args ps t clauses qs args' e prs s,
-        (In (x, (ps, t, clauses)) st.(S_FUN)) ->
+        (Step_arg sub argn argn') ->
+        Step_exp sub (exp_CALL x args) (exp_CALL x (change_nth n argn' args))
+    | Step_exp_CALL_apply : forall sub x args ps t clauses qs args' e prs s,
+        (In (x, (ps, t, clauses)) sub.(S_FUN)) ->
         (In (CLAUSE qs args' e prs) clauses) ->
-        (Match_args st args qs args' s) ->
-        (Reduce_prems st (map (fun pr => subst_prem s pr) prs) []) ->
-        Step_exp st (exp_CALL x args) (subst_exp s e)
-    | Step_exp_CVT_ctx : forall (st : S) e nt1 nt2 e',
-        (Step_exp st e e') ->
-        Step_exp st (exp_CVT e nt1 nt2) (exp_CVT e' nt1 nt2)
-    | Step_exp_CVT_NUM : forall (st : S) (n : num) nt1 nt2 (n' : num),
+        (Match_args sub args qs args' s) ->
+        (Reduce_prems sub (map (fun pr => subst_prem s pr) prs) []) ->
+        Step_exp sub (exp_CALL x args) (subst_exp s e)
+    | Step_exp_CVT_ctx : forall sub e nt1 nt2 e',
+        (Step_exp sub e e') ->
+        Step_exp sub (exp_CVT e nt1 nt2) (exp_CVT e' nt1 nt2)
+    | Step_exp_CVT_NUM : forall sub (n : num) nt1 nt2 (n' : num),
         (numcvt nt2 n = Some n') ->
-        Step_exp st (exp_CVT (exp_NUM n) nt1 nt2) (exp_NUM n')
-    | Step_exp_SUB_ctx1 : forall (st : S) e t1 t2 e',
-        (Step_exp st e e') ->
-        Step_exp st (exp_SUB e t1 t2) (exp_SUB e' t1 t2)
-    | Step_exp_SUB_ctx2 : forall (st : S) e t1 t2 t1',
-        (Step_typ st t1 t1') ->
-        Step_exp st (exp_SUB e t1 t2) (exp_SUB e t1' t2)
-    | Step_exp_SUB_ctx3 : forall (st : S) e t1 t2 t2',
-        (Step_typ st t2 t2') ->
-        Step_exp st (exp_SUB e t1 t2) (exp_SUB e t1 t2')
-    | Step_exp_SUB_SUB : forall (st : S) e' t1' t2' t1 t2, Step_exp st (exp_SUB (exp_SUB e' t1' t2') t1 t2) (exp_SUB e' t1' t2)
-    | Step_exp_SUB_TUB : forall (st : S) n es tups1 tups2 s1 s2,
+        Step_exp sub (exp_CVT (exp_NUM n) nt1 nt2) (exp_NUM n')
+    | Step_exp_SUB_ctx1 : forall sub e t1 t2 e',
+        (Step_exp sub e e') ->
+        Step_exp sub (exp_SUB e t1 t2) (exp_SUB e' t1 t2)
+    | Step_exp_SUB_ctx2 : forall sub e t1 t2 t1',
+        (Step_typ sub t1 t1') ->
+        Step_exp sub (exp_SUB e t1 t2) (exp_SUB e t1' t2)
+    | Step_exp_SUB_ctx3 : forall sub e t1 t2 t2',
+        (Step_typ sub t2 t2') ->
+        Step_exp sub (exp_SUB e t1 t2) (exp_SUB e t1 t2')
+    | Step_exp_SUB_SUB : forall sub e' t1' t2' t1 t2, Step_exp sub (exp_SUB (exp_SUB e' t1' t2') t1 t2) (exp_SUB e' t1' t2)
+    | Step_exp_SUB_TUB : forall sub n es tups1 tups2 s1 s2,
         (List.length es = n) ->
         (List.length tups1 = n) ->
         (List.length tups2 = n) ->
         (Step_exp_SUB_TUP_aux es tups1 = Some s1) ->
         (Step_exp_SUB_TUP_aux es tups2 = Some s2) ->
-        Step_exp st (exp_SUB (exp_TUP es) (typ_plain (plaintyp_TUP tups1)) (typ_plain (plaintyp_TUP tups2))) (exp_TUP (map (fun (x : ((id * typ) * (id * typ)) * exp) =>
-            let (p, e0) := x in
-            let (p1, p2) := p in
-            let (x1, t1) := p1 in let (x2, t2) := p2 in
-            exp_SUB e0 (subst_typ (subst.subst_EXP_generator s1) t1) (subst_typ (subst.subst_EXP_generator s2) t2)
+        Step_exp sub (exp_SUB (exp_TUP es) (typ_plain (plaintyp_TUP tups1)) (typ_plain (plaintyp_TUP tups2))) (exp_TUP (map (fun (x : ((id * typ) * (id * typ)) * exp) =>
+            exp_SUB (snd x) (subst_typ (subst.subst_EXP_generator s1) (snd (fst (fst x)))) (subst_typ (subst.subst_EXP_generator s2) (snd (snd (fst x))))
         ) (combine (combine tups1 tups2) es)))
-    | Step_exp_SUB_OPT_Some : forall (st : S) e t1 t2, Step_exp st (exp_SUB (exp_OPT (Some e)) (typ_plain (plaintyp_ITER t1 iter_QUEST)) (typ_plain (plaintyp_ITER t2 iter_QUEST))) (exp_OPT (Some (exp_SUB e t1 t2)))
-    | Step_exp_SUB_OPT_None : forall (st : S) t1 t2, Step_exp st (exp_SUB (exp_OPT None) (typ_plain (plaintyp_ITER t1 iter_QUEST)) (typ_plain (plaintyp_ITER t2 iter_QUEST))) (exp_OPT None)
-    | Step_exp_SUB_LIST : forall (st : S) es t1 t2, Step_exp st (exp_SUB (exp_LIST es) (typ_plain (plaintyp_ITER t1 iter_STAR)) (typ_plain (plaintyp_ITER t2 iter_STAR))) (exp_LIST (map (fun e => exp_SUB e t1 t2) es))
-    | Step_exp_SUB_STR : forall (st : S) efs x1 args1 x2 args2 ats es ts1 ts2 q1ss q2ss pr1ss pr2ss tfs1 ,
-        (Expand_typ st (typ_VAR x1 args1) (deftyp_STRUCT tfs1)) ->
-        (Expand_typ st (typ_VAR x2 args2) (deftyp_STRUCT (combine (combine (combine ats ts2) q2ss) pr2ss))) ->
+    | Step_exp_SUB_OPT_Some : forall sub e t1 t2, Step_exp sub (exp_SUB (exp_OPT (Some e)) (typ_plain (plaintyp_ITER t1 iter_QUEST)) (typ_plain (plaintyp_ITER t2 iter_QUEST))) (exp_OPT (Some (exp_SUB e t1 t2)))
+    | Step_exp_SUB_OPT_None : forall sub t1 t2, Step_exp sub (exp_SUB (exp_OPT None) (typ_plain (plaintyp_ITER t1 iter_QUEST)) (typ_plain (plaintyp_ITER t2 iter_QUEST))) (exp_OPT None)
+    | Step_exp_SUB_LIST : forall sub es t1 t2, Step_exp sub (exp_SUB (exp_LIST es) (typ_plain (plaintyp_ITER t1 iter_STAR)) (typ_plain (plaintyp_ITER t2 iter_STAR))) (exp_LIST (map (fun e => exp_SUB e t1 t2) es))
+    | Step_exp_SUB_STR : forall sub efs x1 args1 x2 args2 ats es ts1 ts2 q1ss q2ss pr1ss pr2ss tfs1 ,
+        (Expand_typ sub (typ_VAR x1 args1) (deftyp_STRUCT tfs1)) ->
+        (Expand_typ sub (typ_VAR x2 args2) (deftyp_STRUCT (combine (combine (combine ats ts2) q2ss) pr2ss))) ->
         (forall x, In x (combine (combine (combine ats ts1) q1ss) pr1ss) -> In x tfs1) ->
         (forall ate, In ate (combine ats es) -> In ate efs) ->
-        Step_exp st (exp_SUB (exp_STR efs) (typ_VAR x1 args1) (typ_VAR x2 args2)) (exp_STR (combine ats (map (fun ett => exp_SUB (fst ett) (fst (snd ett)) (snd (snd ett))) (combine es (combine ts1 ts2)))))
-    | Step_exp_SUB_CASE : forall (st : S) op e x1 args1 x2 args2 t1 t2 tcs1 tcs2 qs1 qs2 prs1 prs2,
-        (Expand_typ st (typ_VAR x1 args1) (deftyp_VARIANT tcs1)) ->
-        (Expand_typ st (typ_VAR x2 args2) (deftyp_VARIANT tcs2)) ->
+        Step_exp sub (exp_SUB (exp_STR efs) (typ_VAR x1 args1) (typ_VAR x2 args2)) (exp_STR (combine ats (map (fun ett => exp_SUB (fst ett) (fst (snd ett)) (snd (snd ett))) (combine es (combine ts1 ts2)))))
+    | Step_exp_SUB_CASE : forall sub op e x1 args1 x2 args2 t1 t2 tcs1 tcs2 qs1 qs2 prs1 prs2,
+        (Expand_typ sub (typ_VAR x1 args1) (deftyp_VARIANT tcs1)) ->
+        (Expand_typ sub (typ_VAR x2 args2) (deftyp_VARIANT tcs2)) ->
         (In (op, t1, qs1, prs1) tcs1) ->
         (In (op, t2, qs2, prs2) tcs2) ->
-        Step_exp st (exp_SUB (exp_INJ op e) (typ_VAR x1 args1) (typ_VAR x2 args2)) (exp_INJ op (exp_SUB e t1 t2))
+        Step_exp sub (exp_SUB (exp_INJ op e) (typ_VAR x1 args1) (typ_VAR x2 args2)) (exp_INJ op (exp_SUB e t1 t2))
 with Step_path : S -> path -> path -> Prop :=
-    | Step_path_refl : forall (st : S) p, Step_path st p p
+    | Step_path_refl : forall sub p, Step_path sub p p
 with Step_iter : S -> iter -> iter -> Prop :=
-    | Step_iter_refl : forall (st : S) it, Step_iter st it it
+    | Step_iter_refl : forall sub it, Step_iter sub it it
 with Step_exppull : S -> exppull -> exppull -> Prop :=
-    | Step_exppull_refl : forall (st : S) ep, Step_exppull st ep ep
+    | Step_exppull_refl : forall sub ep, Step_exppull sub ep ep
 with Eq_exp : S -> exp -> exp -> Prop :=
-    | Eq_exp_prop : forall (st : S) e1 e2 e1' e2',
-        (Reduce_exp st e1 e1') ->
-        (Reduce_exp st e2 e2') ->
-        (* e1' = e2' -> *)
-        Eq_exp st e1 e2
+    | Eq_exp_prop : forall sub e1 e2 e1' e2',
+        (Reduce_exp sub e1 e1') ->
+        (Reduce_exp sub e2 e2') ->
+        (e1' = e2') ->
+        Eq_exp sub e1 e2
 with Reduce_arg : S -> arg -> arg -> Prop :=
-    | Reduce_arg_normal : forall (st : S) a, Reduce_arg st a a
-    | Reduce_arg_step : forall (st : S) a a' a'',
-        (Step_arg st a a') ->
-        (Reduce_arg st a' a'') ->
-        Reduce_arg st a a''
+    | Reduce_arg_normal : forall sub a, Reduce_arg sub a a
+    | Reduce_arg_step : forall sub a a' a'',
+        (Step_arg sub a a') ->
+        (Reduce_arg sub a' a'') ->
+        Reduce_arg sub a a''
 with Step_arg : S -> arg -> arg -> Prop :=
-    | Step_arg_EXP_ctx : forall (st : S) e e',
-        (Step_exp st e e') ->
-        Step_arg st (arg_EXP e) (arg_EXP e')
-    | Step_arg_TYP_ctx : forall (st : S) t t',
-        (Step_typ st t t') ->
-        Step_arg st (arg_TYP t) (arg_TYP t')
+    | Step_arg_EXP_ctx : forall sub e e',
+        (Step_exp sub e e') ->
+        Step_arg sub (arg_EXP e) (arg_EXP e')
+    | Step_arg_TYP_ctx : forall sub t t',
+        (Step_typ sub t t') ->
+        Step_arg sub (arg_TYP t) (arg_TYP t')
 with Eq_arg : S -> arg -> arg -> Prop :=
-    | Eq_arg_prop : forall (st : S) a1 a2 a1' a2',
-        (Reduce_arg st a1 a1') ->
-        (Reduce_arg st a2 a2') ->
-        (* a1' = a2' -> *)
-        Eq_arg st a1 a2
+    | Eq_arg_prop : forall sub a1 a2 a1' a2',
+        (Reduce_arg sub a1 a1') ->
+        (Reduce_arg sub a2 a2') ->
+        (a1' = a2') ->
+        Eq_arg sub a1 a2
 with Match_args : S -> list arg -> list quant -> list arg -> subst -> Prop :=
-    | Match_args_prop : forall (st : S) args qs args' s,
-        (Ok_subst (storenv st) s qs) ->
+    | Match_args_prop : forall sub args qs args' s,
+        (Ok_subst (storenv sub) s qs) ->
         (args = (map (fun arg' => subst_arg s arg') args')) ->
-        Match_args st args qs args' s
+        Match_args sub args qs args' s
 with Reduce_prems : S -> list prem -> list prem -> Prop :=
-    | Reduce_prems_normal : forall (st : S) prs, Reduce_prems st prs prs
-    | Reduce_prems_step : forall (st : S) prs prs' prs'',
-        (Step_prems st prs prs') ->
-        (Reduce_prems st prs' prs'') ->
-        Reduce_prems st prs prs''
+    | Reduce_prems_normal : forall sub prs, Reduce_prems sub prs prs
+    | Reduce_prems_step : forall sub prs prs' prs'',
+        (Step_prems sub prs prs') ->
+        (Reduce_prems sub prs' prs'') ->
+        Reduce_prems sub prs prs''
 with Step_prems : S -> list prem -> list prem -> Prop :=
-    | Step_prems_ctx : forall (st : S) pr1 prs pr1s',
-        (Step_prems st [pr1] pr1s') ->
-        Step_prems st (pr1 :: prs) (pr1s' ++ prs)
-    | Step_prems_IF_ctx : forall (st : S) e e',
-        (Step_exp st e e') ->
-        Step_prems st [prem_IF e] [prem_IF e']
-    | Step_prems_IF_true : forall (st : S), Step_prems st [prem_IF (exp_BOOL true)] []
-    | Step_prems_ELSE : forall (st : S), Step_prems st [prem_ELSE] []
-    | Step_prems_LET_ctx : forall (st : S) e1 e2 e2',
-        (Step_exp st e2 e2') ->
-        Step_prems st [prem_LET e1 e2] [prem_LET e1 e2']
-    | Step_prems_LET : forall (st : S) e1 e2,
-        (Eq_exp st e1 e2) ->
-        Step_prems st [prem_LET e1 e2] []
-    | Step_prems_ITER_ctx1 : forall (st : S) pr it eps pr',
-        (Step_prems st [pr] [pr']) ->
-        Step_prems st [prem_ITER pr it eps] [prem_ITER pr' it eps]
-    | Step_prems_ITER_ctx2 : forall (st : S) pr it eps it',
-        (Step_iter st it it') ->
-        Step_prems st [prem_ITER pr it eps] [prem_ITER pr it' eps]
-    | Step_prems_ITER_ctx3 : forall (st : S) pr it eps n epn epn',
-        (find_nth n eps = Some epn) ->
-        (Step_exppull st epn epn') ->
-        Step_prems st [prem_ITER pr it eps] [prem_ITER pr it (change_nth n epn' eps)]
-    (* ITER_QUEST ITER_PLUS ITER_STAR ITER_SUP_EPS ITER_SUP *)
+    | Step_prems_ctx : forall sub pr1 prs pr1s',
+        (Step_prems sub [pr1] pr1s') ->
+        Step_prems sub (pr1 :: prs) (pr1s' ++ prs)
+    | Step_prems_IF_ctx : forall sub e e',
+        (Step_exp sub e e') ->
+        Step_prems sub [prem_IF e] [prem_IF e']
+    | Step_prems_IF_true : forall sub, Step_prems sub [prem_IF (exp_BOOL true)] []
+    | Step_prems_ELSE : forall sub, Step_prems sub [prem_ELSE] []
+    | Step_prems_LET_ctx : forall sub e1 e2 e2',
+        (Step_exp sub e2 e2') ->
+        Step_prems sub [prem_LET e1 e2] [prem_LET e1 e2']
+    | Step_prems_LET : forall sub e1 e2,
+        (Eq_exp sub e1 e2) ->
+        Step_prems sub [prem_LET e1 e2] []
+    | Step_prems_ITER_ctx1 : forall sub pr it eps pr',
+        (Step_prems sub [pr] [pr']) ->
+        Step_prems sub [prem_ITER pr it eps] [prem_ITER pr' it eps]
+    | Step_prems_ITER_ctx2 : forall sub pr it eps it',
+        (Step_iter sub it it') ->
+        Step_prems sub [prem_ITER pr it eps] [prem_ITER pr it' eps]
+    | Step_prems_ITER_ctx3 : forall sub pr it eps n ep_n ep_n',
+        (find_nth n eps = Some ep_n) ->
+        (Step_exppull sub ep_n ep_n') ->
+        Step_prems sub [prem_ITER pr it eps] [prem_ITER pr it (change_nth n ep_n' eps)]
+    | Step_prems_ITER_QUEST_ALL : forall sub pr xs es, Step_prems sub [prem_ITER pr iter_QUEST (combine xs (map (fun e => exp_OPT (Some e)) es))] [subst_prem (subst_EXP_generator (combine xs es)) pr]
+    | Step_prems_ITER_QUEST_NONE : forall sub pr xs, Step_prems sub [prem_ITER pr iter_QUEST (map (fun x => (x, exp_OPT None)) xs)] nil
+    | Step_prems_ITER_PLUS : forall sub pr x xs e1_head e1_tail ess, Step_prems sub [prem_ITER pr iter_PLUS ((x, exp_LIST (e1_head :: e1_tail)) :: (combine xs (map (fun es => exp_LIST es) ess)))] [prem_ITER pr iter_STAR ((x, exp_LIST (e1_head :: e1_tail)) :: (combine xs (map (fun es => exp_LIST es) ess)))]
+    | Step_prems_ITER_STAR : forall sub pr x es xs ess n,
+        (List.length es = n) ->
+        Step_prems sub [prem_ITER pr iter_STAR ((x, exp_LIST es) :: (combine xs (map (fun es' => exp_LIST es') ess)))] [prem_ITER pr (iter_SUP None (NAT n)) ((x, exp_LIST es) :: (combine xs (map (fun es' => exp_LIST es') ess)))]
+    | Step_prems_SUP_eps : forall sub pr en xs ess y, Step_prems sub [prem_ITER pr (iter_SUP None en) (combine xs (map (fun es => exp_LIST es) ess))] [prem_ITER pr (iter_SUP (Some y) en) (combine xs (map (fun es => exp_LIST es) ess))]
+    | Step_prems_SUP : forall sub pr y n xs ess ess_transposed,
+        (forall es, In es ess -> List.length es = n) ->
+        (transpose exp ess = Some ess_transposed) ->
+        Step_prems sub [prem_ITER pr (iter_SUP (Some y) (NAT n)) (combine xs (map (fun es => exp_LIST es) ess))] (map (fun xi => subst_prem (subst_EXP_generator ((combine xs (nth (snd xi) ess_transposed [])) ++ [(y, exp_NUM (NAT (snd xi)))])) pr) (combine xs (list_element (fun idx => idx) n)))
 with Eq_prems : S -> list prem -> list prem -> Prop :=
-    | Eq_prems_refl : forall (st : S) prs, Eq_prems st prs prs
+    | Eq_prems_refl : forall sub prs, Eq_prems sub prs prs
 with Composable_typ : E -> typ -> Prop :=
     | Composable_typ_ITER : forall (e : E) t t' it,
         (Expand_typ e.(E_S) t (deftyp_ALIAS (typ_plain (plaintyp_ITER t' it)))) ->
@@ -415,7 +469,20 @@ with Sub_typ : E -> typ -> typ -> Prop :=
         (Sub_typ e t1 t2) ->
         (Sub_typ (concat_E e (env_EXP_one x1 t1)) (typ_plain (plaintyp_TUP tups1)) (subst_typ (subst.subst_TYP_generator [(x2, typ_VAR x1 nil)]) (typ_plain (plaintyp_TUP tups2)))) ->
         Sub_typ e (typ_plain (plaintyp_TUP ((x1, t1) :: tups1))) (typ_plain (plaintyp_TUP ((x2, t2) :: tups2)))
-    (* | Sub_typ_struct | Sub_typ_variant *)
+    | Sub_typ_struct : forall (e : E) t1 t2 args t1as t2as qss prss tf1s tf2s,
+        (Expand_typ e.(E_S) t1 (deftyp_STRUCT tf1s)) ->
+        (Expand_typ e.(E_S) t2 (deftyp_STRUCT tf2s)) ->
+        (tf2s = (combine (combine (combine args t2as) qss) prss)) ->
+        (forall tf1, In tf1 (combine (combine (combine args t1as) qss) prss) -> In tf1 tf1s) ->
+        (forall t12, In t12 (combine t1as t2as) -> Sub_typ e (fst t12) (snd t12)) ->
+        Sub_typ e t1 t2
+    | Sub_typ_variant: forall (e : E) t1 t2 tc1s tc2s ms t1as t2as qss prss,
+        (Expand_typ e.(E_S) t1 (deftyp_VARIANT tc1s)) ->
+        (Expand_typ e.(E_S) t2 (deftyp_VARIANT tc2s)) ->
+        (tc1s = combine (combine (combine ms t1as) qss) prss) ->
+        (forall tc2, In tc2 (combine (combine (combine ms t2as) qss) prss) -> In tc2 tc2s) ->
+        (forall t12, In t12 (combine t1as t2as) -> Sub_typ e (fst t12) (snd t12)) ->
+        Sub_typ e t1 t2
     | Sub_typ_iter : forall (e : E) t1 t2 it,
         (Sub_typ e t1 t2) ->
         Sub_typ e (typ_plain (plaintyp_ITER t1 it)) (typ_plain (plaintyp_ITER t2 it))
@@ -459,11 +526,17 @@ with Ok_typ : E -> typ -> Prop :=
         (it = iter_QUEST \/ it = iter_STAR) ->
         Ok_typ E (typ_plain (plaintyp_ITER t it))
 with Ok_deftyp : E -> deftyp -> Prop := 
-    | Ok_deftyp_ALIAS : forall E t,
-        (Ok_typ E t) ->
-        Ok_deftyp E (deftyp_ALIAS t)
-    (*| Ok_deftyp_STRUCT : forall E tfs*)
-    (*| Ok_deftyp_VARIANT*)
+    | Ok_deftyp_ALIAS : forall (e : E) t,
+        (Ok_typ e t) ->
+        Ok_deftyp e (deftyp_ALIAS t)
+    | Ok_deftyp_STRUCT : forall (e : E) args ts qss prss,
+        (forall tf, In tf (map (fun x => let '(((a, t), qs), prs) := x in (a, t, qs, prs)) (combine (combine (combine args ts) qss) prss)) -> Ok_typfield e tf) ->
+        (disjoint args) ->
+        Ok_deftyp e (deftyp_STRUCT (combine (combine (combine args ts) qss) prss))
+    | Ok_deftyp_VARIANT : forall (e : E) ms ts qss prss,
+        (forall tc, In tc (combine (combine (combine ms ts) qss) prss) -> Ok_typcase e tc) ->
+        (disjoint ms) ->
+        Ok_deftyp e (deftyp_VARIANT (map (fun x => let '(((m, t), qs), prs) := x in (m, t, qs, prs)) (combine (combine (combine ms ts) qss) prss)))
 with Ok_typfield : E -> typfield -> Prop :=
     | Ok_typfield_prop : forall E (a : atom) (t : typ) (qs : list param) (prs : list prem),
         (Ok_typ E t) ->
@@ -480,10 +553,10 @@ with Ok_iter : E -> iter -> iter -> E -> Prop :=
     | Ok_iter_QUEST : forall E, Ok_iter E iter_QUEST iter_QUEST empty_E
     | Ok_iter_STAR : forall E, Ok_iter E iter_STAR iter_STAR empty_E
     | Ok_iter_PLUS : forall E, Ok_iter E iter_PLUS iter_STAR empty_E
-    (*| Ok_iter_SUP_Some : forall E x e,
-        (Ok_exp E e (plaintyp_op NAT)) ->
-        Ok_iter E (iter_SUP (Some x) e) iter_STAR (env_EXP_generator [])
-    | Ok_iter_SUP_None*)
+    | Ok_iter_SUP_Some : forall (e : E) x exp,
+        (Ok_exp e exp (plaintyp_op (optyp_num numtyp_NAT))) ->
+        Ok_iter e (iter_SUP (Some x) exp) iter_STAR (env_EXP_generator [])
+    | Ok_iter_SUP_None : forall E e, Ok_iter E (iter_SUP None e) iter_STAR empty_E
 with Ok_numunop : numunop -> numtyp -> numtyp -> Prop :=
     | Ok_numunop_sign : forall (op : numunop) nt,
         (Sub_numtyp numtyp_INT nt) ->
@@ -790,7 +863,7 @@ with Ok_inst : E -> inst -> list param -> Prop :=
         (Ok_deftyp (concat_E E (paramenv qs)) dt) ->
         Ok_inst E (INST qs args dt) ps
 with Ok_rule : E -> rul -> typ -> Prop :=
-    | Ok_ruel_prop : forall E qs e prs t,
+    | Ok_rule_prop : forall E qs e prs t,
         (Ok_params E qs) ->
         (Ok_exp (concat_E E (paramenv qs)) e t) ->
         (Ok_prems (concat_E E (paramenv qs)) prs) ->
