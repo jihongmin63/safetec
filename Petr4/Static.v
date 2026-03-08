@@ -33,22 +33,6 @@ Fixpoint search_Sigma (Sigma : list (string * Value)) (x : string) : option Valu
         if (x =? x')%string then Some V else search_Sigma Sigma' x
     end.
 
-Fixpoint update_Delta (Delta : Type_definition_context) (generics : list string) (rhos : list (option Base_type)) : option Type_definition_context :=
-  match generics, rhos with
-  | nil, nil => Some Delta
-  | cons generic generics', cons rho rhos' =>
-      match update_Delta Delta generics' rhos' with
-      | Some ctx' => 
-        match rho with
-        | Some ty => Some (tydefctx_type_definition generic (fntyp_data_type ty) ctx')
-        | None => Some (tydefctx_type_variable_and_definition_context generic ctx')
-        end
-      | None => None
-      end
-  | _, _ => None
-  end.
-
-(* "return" is a Coq keyword; use a definition to avoid parsing issues. *)
 Definition name_return : string := "ret" ++ "urn".
 
 Definition update_Gamma (Gamma : Typing_context) (x : string) (tau : Function_type) : Typing_context := tyctx_typing_context x tau Gamma.
@@ -209,3 +193,4 @@ with Statement_Typing (Sigma : Constant_context) (Gamma : Typing_context) (Delta
         (Sigma , Gamma , Delta ⊢ (exp_function_call exp rhos args) : tau goes d) ->
         Statement_Typing Sigma Gamma Delta [st_method_call exp rhos args] Sigma Gamma
 .
+

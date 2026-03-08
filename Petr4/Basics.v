@@ -4,7 +4,10 @@ From Stdlib Require Import Arith.Arith.
 From Stdlib Require Import Lists.List.
 From Stdlib Require Import Lia.
 
-Inductive Op : Type :=.
+Inductive Op : Type :=
+    | unaryOp
+    | binaryOp
+.
 
 Definition len (n : nat) : nat :=
   match n with
@@ -116,21 +119,22 @@ Definition Environment := list (string * Location).
 
 Definition Store_typing_context := list (Location * Function_type).
 
-(*Definition Control_plane : Loc -> Value -> *)
-
 Inductive Value : Type :=
     | val_boolean (b : bool)
     | val_integer (n : nat)
     | val_records (fs : list (string * Value))
-    | val_header (fs : list (string * Value))
+    | val_header (fs : list (string * Function_type * Value))
     | val_type_members (X f : string)
     | val_header_stack (ty : Function_type) (vals : list Value)
+    | val_closures (eps : Environment) (generics : list string) (args : list (Direction * string * Function_type)) (tau : Function_type) (decls : list Declaration) (stmt : Statement)
     | val_built_in_function (name : string) (args : list (Direction * string * Function_type)) (ty : Function_type)
     | val_table (loc : Location) (eps : Environment) (keys : list Keys) (acts : list Actions)
-    | val_constructor_closures (eps : Environment) (args_w_directions : list (Direction * string * Function_type)) (args_ctrl : list (string * Function_type)) (decls : list Declaration) (stmt : Statement)
+    | val_constructor_closures (eps : Environment) (args : list (Direction * string * Function_type)) (args_ctrl : list (string * Function_type)) (decls : list Declaration) (stmt : Statement)
 .
 
-Definition Store := Location -> Value.
+Definition Store := list Value.
+
+Definition Control_plane := forall (A B : Type), Location -> Value -> list (A -> B) -> B.
 
 Inductive Signal : Type :=
     | sig_continue
@@ -151,3 +155,18 @@ Inductive Type_definition_context : Type :=
 .
 
 Definition Constant_context := list (string * Value).
+
+Fixpoint update_Delta (Delta : Type_definition_context) (generics : list string) (rhos : list (option Base_type)) : option Type_definition_context :=
+  match generics, rhos with
+  | nil, nil => Some Delta
+  | cons generic generics', cons rho rhos' =>
+      match update_Delta Delta generics' rhos' with
+      | Some ctx' => 
+        match rho with
+        | Some ty => Some (tydefctx_type_definition generic (fntyp_data_type ty) ctx')
+        | None => Some (tydefctx_type_variable_and_definition_context generic ctx')
+        end
+      | None => None
+      end
+  | _, _ => None
+  end.
